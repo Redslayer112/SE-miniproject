@@ -1,0 +1,16 @@
+{
+  "description": "Invalid: negative green duration; conflict fixture must be added once conflict definition is approved.",
+  "signal_plan": {
+    "phases": [
+      {
+        "order": 1,
+        "movement_ids": [
+          "TM1"
+        ],
+        "green_s": -1,
+        "yellow_s": 3,
+        "all_red_s": 1
+      }
+    ]
+  }
+}

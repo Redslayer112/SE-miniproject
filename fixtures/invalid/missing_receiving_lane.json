@@ -1,0 +1,30 @@
+{
+  "description": "Invalid: turning movement points to a nonexistent receiving segment/lane.",
+  "network": {
+    "intersections": [
+      {
+        "id": "I1"
+      },
+      {
+        "id": "I2"
+      }
+    ],
+    "segments": [
+      {
+        "id": "R1",
+        "from": "I1",
+        "to": "I2",
+        "length_m": 100,
+        "lane_count": 1
+      }
+    ],
+    "turning_movements": [
+      {
+        "id": "TM_BAD",
+        "intersection": "I2",
+        "from_segment": "R1",
+        "to_segment": "R_MISSING"
+      }
+    ]
+  }
+}

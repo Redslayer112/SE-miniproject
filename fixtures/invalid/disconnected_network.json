@@ -1,0 +1,25 @@
+{
+  "description": "Disconnected graph fixture; adapt to final schema/API.",
+  "network": {
+    "intersections": [
+      {
+        "id": "I1"
+      },
+      {
+        "id": "I2"
+      },
+      {
+        "id": "I3"
+      }
+    ],
+    "segments": [
+      {
+        "id": "R1",
+        "from": "I1",
+        "to": "I2",
+        "length_m": 100,
+        "lane_count": 1
+      }
+    ]
+  }
+}
