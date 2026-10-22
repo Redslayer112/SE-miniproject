@@ -1,0 +1,9 @@
+{
+  "signal_plan": {
+    "intersection_id": "X",
+    "phases": [
+      {"order": 1, "movement_ids": ["SN", "WE"], "green_s": 0, "yellow_s": 3, "all_red_s": 1},
+      {"order": 2, "movement_ids": ["NOPE"], "green_s": 10, "yellow_s": -1, "all_red_s": 1}
+    ]
+  }
+}
