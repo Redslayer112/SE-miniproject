@@ -37,12 +37,16 @@ class ValidationResult:
         return not self.errors
 
 
+def _is_real(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 def _positive_finite(v) -> bool:
-    return isinstance(v, (int, float)) and math.isfinite(v) and v > 0
+    return _is_real(v) and math.isfinite(v) and v > 0
 
 
 def _has_lane(seg) -> bool:
-    return isinstance(seg.lane_count, int) and seg.lane_count > 0
+    return isinstance(seg.lane_count, int) and not isinstance(seg.lane_count, bool) and seg.lane_count > 0
 
 
 def validate(network: Network) -> ValidationResult:

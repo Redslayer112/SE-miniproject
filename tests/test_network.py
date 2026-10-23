@@ -62,6 +62,17 @@ def test_other_errors():
     assert ("MOVEMENT_NOT_AT_INTERSECTION", "turning_movement", "TM2") in got
 
 
+def test_booleans_rejected():
+    net = load_network(DATA / "valid.json")
+    net.segments[0].length_m = True
+    net.segments[0].lane_count = True
+    net.segments[1].speed_limit_mps = True
+    got = codes(validate(net))
+    assert ("INVALID_LENGTH", "segment", "R1") in got
+    assert ("INVALID_LANE_COUNT", "segment", "R1") in got
+    assert ("INVALID_SPEED_LIMIT", "segment", "R2") in got
+
+
 def test_disconnected_reports_each_outside_intersection():
     net = load_network(DATA / "valid.json")
     net.intersections += [Intersection("I3"), Intersection("I4")]
