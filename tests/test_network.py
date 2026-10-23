@@ -79,6 +79,13 @@ def test_disconnected_reports_each_outside_intersection():
     assert {e.element_id for e in validate(net).errors} == {"I3", "I4"}
 
 
+def test_empty_network_blocked():
+    assert validate(Network()).is_valid is False
+    assert ("EMPTY_NETWORK", "network", "") in codes(validate(Network()))
+    with pytest.raises(NetworkBlockedError):
+        NetworkService(Network()).provide_network_state()
+
+
 def test_round_trip(tmp_path):
     net = Network(
         [Intersection("A", (1.5, -2), ControlType.SIGNALIZED),

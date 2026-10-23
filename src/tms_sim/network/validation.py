@@ -62,6 +62,9 @@ def validate(network: Network) -> ValidationResult:
             if n > 1:
                 add("DUPLICATE_ID", f"{etype} id '{eid}' is used {n} times", etype, eid)
 
+    if not network.intersections or not network.segments:
+        add("EMPTY_NETWORK", "the network has no intersections or no segments", "network", "")
+
     inter_ids = {i.id for i in network.intersections}
     seg_by_id = {s.id: s for s in network.segments}
 
