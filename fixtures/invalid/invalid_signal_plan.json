@@ -1,6 +1,7 @@
 {
-  "description": "Invalid: negative green duration; conflict fixture must be added once conflict definition is approved.",
+  "description": "Invalid: signal plan contains a negative green duration.",
   "signal_plan": {
+    "intersection_id": "I1",
     "phases": [
       {
         "order": 1,

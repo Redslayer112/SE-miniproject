@@ -1,1 +1,25 @@
-{"schema_version": "1.0", "network": 
+{
+    "schema_version": "1.0",
+    "network": {
+        "intersections": [
+            {
+                "id": "I1",
+                "position": [
+                    0,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            }
+        ],
+        "segments": [
+            {
+                "id": "R1",
+                "from": "I1",
+                "to": "I2",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            }
+        ],
+        "turning_movements": []
+    }

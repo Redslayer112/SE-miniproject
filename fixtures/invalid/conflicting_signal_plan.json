@@ -1,13 +1,13 @@
 {
-    "description": "Draft invalid fixture: two conflicting movements are assigned green in the same signal phase. Confirm movement IDs and conflict rules against the approved project schema.",
+    "description": "Invalid signal plan: two conflicting movements are assigned green in the same signal phase.",
     "signal_plan": {
-        "intersection_id": "I1",
+        "intersection_id": "C",
         "phases": [
             {
                 "order": 1,
                 "movement_ids": [
-                    "TM_CONFLICT_1",
-                    "TM_CONFLICT_2"
+                    "SN",
+                    "WE"
                 ],
                 "green_s": 20,
                 "yellow_s": 3,

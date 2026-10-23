@@ -1,8 +1,8 @@
 {
-  "description": "Invalid: negative arrival rate and turning ratios not summing to 1.",
+  "description": "Invalid: negative arrival rate and turning ratios that do not sum to 1.",
   "demand": {
     "arrival_rates_vehicles_per_hour": {
-      "R1": -5
+      "R2": -5
     },
     "turning_ratios": {
       "TM1": 0.6,
