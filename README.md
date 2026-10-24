@@ -68,6 +68,24 @@ The requirements specification, architecture and design specification, and softw
 - **UI, 2D Visualization & UX:** Develops the user interface and visual representation of the simulation.
 - **Metrics, Reporting, QA & Testing:** Handles traffic performance metrics, report generation, quality assurance, and test execution.
 
+## Development
+
+Requires Python 3.11+.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+python -m pytest                   # all tests (Qt runs offscreen, no display needed)
+python -m tms_sim                  # blank workbench window
+python -m tms_sim run tests/data/scenario/small_valid_scenario.json   # headless end-to-end run
+```
+
+Layout: `src/tms_sim/network`, `signal` (network and signal-plan models), `sim` (demand generator, engine,
+scenario runner), `ui` (presentation), `storage`, `reporting`; tests in `tests/`.
+PySide6 (LGPL-3.0) is the only runtime dependency. Model decisions proposed for issue #1:
+`docs/decisions/0001-baseline-proposal.md`. Differences from SRS/SAD/STP: `DEVIATIONS.md`.
+
 ## Network Interface (SAD §4.3, Interface 1: Network Editor → Simulation Engine)
 
 Implemented in `src/tms_sim/network/`. `NetworkService` exposes the SAD operations under both
