@@ -68,6 +68,22 @@ The requirements specification, architecture and design specification, and softw
 - **UI, 2D Visualization & UX:** Develops the user interface and visual representation of the simulation.
 - **Metrics, Reporting, QA & Testing:** Handles traffic performance metrics, report generation, quality assurance, and test execution.
 
+## Network Interface (SAD §4.3, Interface 1: Network Editor → Simulation Engine)
+
+Implemented in `src/tms_sim/network/`. `NetworkService` exposes the SAD operations under both
+the SAD names and Python-style names (the approved equivalent):
+
+| SAD operation | Python name | Behaviour |
+|---|---|---|
+| `loadNetwork(path)` | `load_network` | Reads the `network` section of a JSON scenario file. Raises `NetworkFormatError` if the file is structurally broken. |
+| `validateNetwork()` | `validate_network` | Returns a `ValidationResult`. Every defect is a `ValidationIssue` with a specific `code`, `element_type` and `element_id`. |
+| `provideNetworkState()` | `provide_network_state` | Returns the network, or raises `NetworkBlockedError` (carrying the errors) if any validation error exists. A run must not start in that case. |
+
+Blocking errors include `DISCONNECTED_GRAPH`, `ZERO_LANES`, `ZERO_LENGTH` and `NO_RECEIVING_LANE`.
+A segment's direction is the edge from `from_intersection` to `to_intersection`.
+
+Run the tests with `python -m pytest` from the repository root.
+
 ## Testing
 
 Testing will be performed according to the Software Test Plan (STP). The focus will include:
