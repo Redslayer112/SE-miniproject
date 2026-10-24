@@ -1,0 +1,18 @@
+{
+    "description": "Invalid signal plan: two conflicting movements are assigned green in the same signal phase.",
+    "signal_plan": {
+        "intersection_id": "C",
+        "phases": [
+            {
+                "order": 1,
+                "movement_ids": [
+                    "SN",
+                    "WE"
+                ],
+                "green_s": 20,
+                "yellow_s": 3,
+                "all_red_s": 1
+            }
+        ]
+    }
+}

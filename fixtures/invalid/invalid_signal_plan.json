@@ -1,0 +1,17 @@
+{
+  "description": "Invalid: signal plan contains a negative green duration.",
+  "signal_plan": {
+    "intersection_id": "I1",
+    "phases": [
+      {
+        "order": 1,
+        "movement_ids": [
+          "TM1"
+        ],
+        "green_s": -1,
+        "yellow_s": 3,
+        "all_red_s": 1
+      }
+    ]
+  }
+}
