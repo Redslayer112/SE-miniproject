@@ -38,13 +38,12 @@ class ValidationResult:
         return not self.errors
 
 
+def _is_real(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 def _positive_finite(v) -> bool:
-    return (
-        not isinstance(v, bool)
-        and isinstance(v, (int, float))
-        and math.isfinite(v)
-        and v > 0
-    )
+    return _is_real(v) and math.isfinite(v) and v > 0
 
 
 def _has_lane(seg) -> bool:
@@ -61,11 +60,11 @@ def validate(network: Network) -> ValidationResult:
     def add(code, message, etype, eid, severity=ERROR):
         issues.append(ValidationIssue(code, message, etype, eid, severity))
 
-    # Reject networks with no intersections.
-    if not network.intersections:
+    # Reject networks with no intersections or no segments.
+    if not network.intersections or not network.segments:
         add(
             "EMPTY_NETWORK",
-            "network has no intersections",
+            "the network has no intersections or no segments",
             "network",
             "",
         )
@@ -175,7 +174,8 @@ def validate(network: Network) -> ValidationResult:
                 m.id,
             )
 
-        src, dst = seg_by_id.get(m.from_segment), seg_by_id.get(m.to_segment)
+        src = seg_by_id.get(m.from_segment)
+        dst = seg_by_id.get(m.to_segment)
 
         for ref, seg in ((m.from_segment, src), (m.to_segment, dst)):
             if seg is None:
