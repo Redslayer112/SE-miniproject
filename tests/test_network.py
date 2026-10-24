@@ -1,11 +1,22 @@
+
 import math
 from pathlib import Path
 
 import pytest
 
 from tms_sim.network import (
-    ControlType, Intersection, Network, NetworkBlockedError, NetworkFormatError,
-    NetworkService, Segment, TurningMovement, load_network, save_network, validate)
+    ControlType,
+    Intersection,
+    Network,
+    NetworkBlockedError,
+    NetworkFormatError,
+    NetworkService,
+    Segment,
+    TurningMovement,
+    load_network,
+    save_network,
+    validate,
+)
 
 DATA = Path(__file__).parent / "data" / "network"
 
@@ -24,8 +35,10 @@ def test_valid_network():
     ("disconnected", {("DISCONNECTED_GRAPH", "intersection", "I3")}),
     ("zero_lanes", {("ZERO_LANES", "segment", "R2")}),
     ("zero_length", {("ZERO_LENGTH", "segment", "R2")}),
-    ("missing_receiving_lane", {("ZERO_LANES", "segment", "R1"),
-                                ("NO_RECEIVING_LANE", "turning_movement", "TM1")}),
+    ("missing_receiving_lane", {
+        ("ZERO_LANES", "segment", "R1"),
+        ("NO_RECEIVING_LANE", "turning_movement", "TM1"),
+    }),
 ])
 def test_each_defect(fixture, expected):
     r = validate(load_network(DATA / f"{fixture}.json"))
@@ -40,8 +53,11 @@ def test_all_errors_listed():
     net.segments[1].lane_count = 0
     net.intersections.append(Intersection("I9"))
     got = codes(validate(net))
-    assert {("ZERO_LENGTH", "segment", "R1"), ("ZERO_LANES", "segment", "R2"),
-            ("DISCONNECTED_GRAPH", "intersection", "I9")} <= got
+    assert {
+        ("ZERO_LENGTH", "segment", "R1"),
+        ("ZERO_LANES", "segment", "R2"),
+        ("DISCONNECTED_GRAPH", "intersection", "I9"),
+    } <= got
 
 
 def test_other_errors():
@@ -88,13 +104,23 @@ def test_empty_network_blocked():
 
 def test_round_trip(tmp_path):
     net = Network(
-        [Intersection("A", (1.5, -2), ControlType.SIGNALIZED),
-         Intersection("B", (10, 20), ControlType.YIELD_CONTROLLED),
-         Intersection("C", None, ControlType.STOP_CONTROLLED),
-         Intersection("D", (0, 0), ControlType.UNCONTROLLED)],
-        [Segment("S1", "A", "B", 123.4, 3, 13.9), Segment("S2", "B", "A", 50, 2, 8.3),
-         Segment("S3", "B", "C", 70, 1, 9), Segment("S4", "C", "D", 70, 1, 9)],
-        [TurningMovement("T1", "B", "S1", "S2"), TurningMovement("T2", "B", "S1", "S3")])
+        [
+            Intersection("A", (1.5, -2), ControlType.SIGNALIZED),
+            Intersection("B", (10, 20), ControlType.YIELD_CONTROLLED),
+            Intersection("C", None, ControlType.STOP_CONTROLLED),
+            Intersection("D", (0, 0), ControlType.UNCONTROLLED),
+        ],
+        [
+            Segment("S1", "A", "B", 123.4, 3, 13.9),
+            Segment("S2", "B", "A", 50, 2, 8.3),
+            Segment("S3", "B", "C", 70, 1, 9),
+            Segment("S4", "C", "D", 70, 1, 9),
+        ],
+        [
+            TurningMovement("T1", "B", "S1", "S2"),
+            TurningMovement("T2", "B", "S1", "S3"),
+        ],
+    )
     p = tmp_path / "net.json"
     save_network(net, p)
     first = p.read_text()
@@ -106,17 +132,24 @@ def test_round_trip(tmp_path):
 
 def test_loader_keeps_invalid_values_and_defaults(tmp_path):
     p = tmp_path / "n.json"
-    p.write_text('{"network": {"intersections": [{"id": "I1"}], '
-                 '"segments": [{"id": "R", "from": "I1", "to": "I1", "length_m": 0, "lane_count": 0}]}}')
+    p.write_text(
+        '{"network": {"intersections": [{"id": "I1"}], '
+        '"segments": [{"id": "R", "from": "I1", "to": "I1", '
+        '"length_m": 0, "lane_count": 0}]}}'
+    )
     net = load_network(p)
     assert net.intersections[0].control_type is ControlType.UNCONTROLLED
     assert net.intersections[0].position is None
-    assert net.segments[0].speed_limit_mps is None and net.segments[0].lane_count == 0
+    assert net.segments[0].speed_limit_mps is None
+    assert net.segments[0].lane_count == 0
 
 
 def test_loader_ignores_other_keys(tmp_path):
     p = tmp_path / "n.json"
-    p.write_text('{"schema_version": "1.0", "network": {}, "signal_plan": 5, "demand": [], "simulation": {}}')
+    p.write_text(
+        '{"schema_version": "1.0", "network": {}, '
+        '"signal_plan": 5, "demand": [], "simulation": {}}'
+    )
     assert load_network(p) == Network()
 
 
@@ -148,7 +181,10 @@ def test_service_valid():
     assert svc.provide_network_state() is net
 
 
-@pytest.mark.parametrize("fixture", ["disconnected", "zero_lanes", "zero_length", "missing_receiving_lane"])
+@pytest.mark.parametrize(
+    "fixture",
+    ["disconnected", "zero_lanes", "zero_length", "missing_receiving_lane"],
+)
 def test_service_blocks_invalid(fixture):
     svc = NetworkService()
     svc.load_network(DATA / f"{fixture}.json")
@@ -169,3 +205,38 @@ def test_service_camel_case_aliases():
     net = svc.loadNetwork(DATA / "valid.json")
     assert svc.validateNetwork().is_valid
     assert svc.provideNetworkState() is net
+
+
+# Additional regression tests for the validation fixes.
+
+
+def test_empty_network_blocked():
+    net = Network([], [], [])
+
+    result = validate(net)
+
+    assert not result.is_valid
+    assert ("EMPTY_NETWORK", "network", "") in codes(result)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_boolean_length_and_speed_are_invalid(value):
+    net = load_network(DATA / "valid.json")
+    net.segments[0].length_m = value
+    net.segments[0].speed_limit_mps = value
+
+    result = validate(net)
+    got = codes(result)
+
+    assert ("INVALID_LENGTH", "segment", "R1") in got
+    assert ("INVALID_SPEED_LIMIT", "segment", "R1") in got
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_boolean_lane_count_is_invalid(value):
+    net = load_network(DATA / "valid.json")
+    net.segments[0].lane_count = value
+
+    result = validate(net)
+
+    assert ("INVALID_LANE_COUNT", "segment", "R1") in codes(result)
