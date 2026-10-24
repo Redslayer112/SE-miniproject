@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "network": {
+    "intersections": [
+      {"id": "I1", "position": [0, 0], "control_type": "signalized"},
+      {"id": "I2", "position": [100, 0], "control_type": "stop_controlled"}
+    ],
+    "segments": [
+      {"id": "R1", "from": "I1", "to": "I2", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9},
+      {"id": "R2", "from": "I2", "to": "I1", "length_m": 0, "lane_count": 1, "speed_limit_mps": 13.9}
+    ],
+    "turning_movements": [
+      {"id": "TM1", "intersection": "I1", "from_segment": "R2", "to_segment": "R1"}
+    ]
+  }
+}

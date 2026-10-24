@@ -1,0 +1,20 @@
+[project]
+name = "tms-sim"
+version = "0.1.0"
+requires-python = ">=3.11"
+# PySide6 is LGPL-3.0 (permissive enough for SRS §2.5; dynamic linking only). Nothing else is needed yet.
+dependencies = ["PySide6>=6.6,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "network": {},
+  "signal_plan": {
+    "intersection_id": "X",
+    "phases": [
+      {"order": 1, "movement_ids": ["SN", "NS"], "green_s": 20, "yellow_s": 3, "all_red_s": 1},
+      {"order": 2, "movement_ids": ["WE", "EW"], "green_s": 15.5, "yellow_s": 3, "all_red_s": 1}
+    ]
+  }
+}
