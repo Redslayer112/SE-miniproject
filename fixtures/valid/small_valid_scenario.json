@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "reference-small-001",
+  "name": "Small valid reference network",
+  "units": {
+    "length": "m",
+    "speed": "m/s",
+    "time": "s"
+  },
+  "network": {
+    "intersections": [
+      {
+        "id": "I1",
+        "position": [
+          0,
+          0
+        ],
+        "control_type": "signalized"
+      },
+      {
+        "id": "I2",
+        "position": [
+          100,
+          0
+        ],
+        "control_type": "uncontrolled"
+      }
+    ],
+    "segments": [
+      {
+        "id": "R1",
+        "from": "I1",
+        "to": "I2",
+        "length_m": 100,
+        "lane_count": 1,
+        "speed_limit_mps": 13.9
+      },
+      {
+        "id": "R2",
+        "from": "I2",
+        "to": "I1",
+        "length_m": 100,
+        "lane_count": 1,
+        "speed_limit_mps": 13.9
+      }
+    ],
+    "turning_movements": [
+      {
+        "id": "TM1",
+        "intersection": "I1",
+        "from_segment": "R2",
+        "to_segment": "R1"
+      }
+    ]
+  },
+  "signal_plan": {
+    "intersection_id": "I1",
+    "phases": [
+      {
+        "order": 1,
+        "movement_ids": [
+          "TM1"
+        ],
+        "green_s": 20,
+        "yellow_s": 3,
+        "all_red_s": 1
+      }
+    ]
+  },
+  "demand": {
+    "arrival_rates_vehicles_per_hour": {
+      "R2": 180
+    },
+    "turning_ratios": {
+      "TM1": 1.0
+    }
+  },
+  "simulation": {
+    "seed": 42,
+    "duration_s": 600,
+    "time_step_s": 0.1
+  }
+}
