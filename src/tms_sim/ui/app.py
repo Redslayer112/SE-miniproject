@@ -62,7 +62,9 @@ from tms_sim.sim.serialization import (
     load_scenario_document,
     save_scenario_document,
 )
+from tms_sim.reporting.comparison import SimulationRunRecord
 from tms_sim.ui.charts import LivePerformancePanel
+from tms_sim.ui.comparison import ScenarioComparisonDialog
 from tms_sim.ui.history import ScenarioHistoryManager
 
 logger = logging.getLogger(__name__)
@@ -926,6 +928,9 @@ class Workbench(QMainWindow):
         self.set_dirty(False)
         self.history_manager = ScenarioHistoryManager(self.scenario_data, max_history=50)
         self.update_undo_redo_actions()
+        self.captured_runs: list[SimulationRunRecord] = []
+        self._last_captured_engine_finished_state: bool = False
+        self.comparison_dialog: ScenarioComparisonDialog | None = None
 
     def build_ui(self):
         self.setStyleSheet("""
@@ -1073,6 +1078,13 @@ class Workbench(QMainWindow):
         reset_view_action.setStatusTip("Reset canvas zoom and pan to 100%")
         reset_view_action.triggered.connect(self.canvas.reset_view)
 
+        # Simulation menu
+        sim_menu = menubar.addMenu("&Simulation")
+        self.compare_action = sim_menu.addAction("⚖ &Compare Runs...")
+        self.compare_action.setShortcut("Ctrl+M")
+        self.compare_action.setStatusTip("Compare performance metrics across completed simulation runs")
+        self.compare_action.triggered.connect(self.open_comparison_dialog)
+
         # Header toolbar
         header = QHBoxLayout()
         title = QLabel("Traffic Management System")
@@ -1087,6 +1099,10 @@ class Workbench(QMainWindow):
         self.btn_redo = QPushButton("↷ Redo")
         self.btn_redo.setToolTip("Redo last undone change (Ctrl+Y)")
         self.btn_redo.clicked.connect(self.redo)
+
+        self.btn_compare = QPushButton("⚖ Compare")
+        self.btn_compare.setToolTip("Compare completed simulation runs side-by-side (Ctrl+M)")
+        self.btn_compare.clicked.connect(self.open_comparison_dialog)
 
         self.reset_view_button = QPushButton("⟲ Reset View")
         self.reset_view_button.setToolTip("Reset canvas zoom and pan (Ctrl+R or double-click canvas)")
@@ -1110,6 +1126,7 @@ class Workbench(QMainWindow):
         header.addStretch()
         header.addWidget(self.btn_undo)
         header.addWidget(self.btn_redo)
+        header.addWidget(self.btn_compare)
         header.addWidget(self.reset_view_button)
         header.addWidget(self.open_button)
         header.addWidget(self.save_button)
@@ -1542,6 +1559,14 @@ class Workbench(QMainWindow):
 
         # Backwards compatibility attributes
         self.remaining_label = QLabel("0")
+
+        self.btn_compare_runs = QPushButton("⚖  Compare Completed Runs…")
+        self.btn_compare_runs.setStyleSheet(
+            "background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-weight: 600; padding: 5px; border-radius: 4px;"
+        )
+        self.btn_compare_runs.setToolTip("Compare completed simulation runs side-by-side (Ctrl+M)")
+        self.btn_compare_runs.clicked.connect(self.open_comparison_dialog)
+        rl.addWidget(self.btn_compare_runs)
 
         right_layout.addWidget(results_panel)
 
@@ -2576,10 +2601,13 @@ class Workbench(QMainWindow):
             "Simulation completed" if self.engine.finished
             else "Advanced one simulation step"
         )
+        if self.engine.finished:
+            self._auto_capture_completed_run()
 
     def reset_simulation(self):
         if self.timer.isActive():
             self.timer.stop()
+        self._last_captured_engine_finished_state = False
         if self.engine is not None:
             self.engine.reset()
             if hasattr(self, "speed_box"):
@@ -2611,6 +2639,7 @@ class Workbench(QMainWindow):
                     self.timer.stop()
                 self.status_label.setText("Simulation completed")
                 self.update_metrics()
+                self._auto_capture_completed_run()
 
     def _shortcut_toggle_play_pause(self):
         focused = QApplication.focusWidget() or (self.focusWidget() if hasattr(self, "focusWidget") else None)
@@ -2724,6 +2753,8 @@ class Workbench(QMainWindow):
             return
 
         m = compute_metrics(self.engine)
+        if self.engine.finished:
+            self._auto_capture_completed_run()
 
         if hasattr(self, "history_tracker"):
             self.history_tracker.record_state(self.engine, force=self.engine.finished)
@@ -3125,6 +3156,46 @@ class Workbench(QMainWindow):
 
         self.update_undo_redo_actions()
         return True
+
+    def capture_current_run(self, label: str = "") -> SimulationRunRecord | None:
+        """Capture an immutable record of the current simulation run if completed."""
+        if self.engine is None or not getattr(self.engine, "finished", False):
+            return None
+
+        run_idx = len(self.captured_runs) + 1
+        scen_name = self.scenario_data.get("scenario_id") or (self.scenario_path.stem if self.scenario_path else "Scenario")
+        run_label = label or f"Run {run_idx}: {scen_name}"
+        run_id = f"run_{run_idx}_{int(self.engine.time)}_{id(self.engine)}"
+        record = SimulationRunRecord.from_engine(
+            engine=self.engine,
+            scenario_name=scen_name,
+            label=run_label,
+            run_id=run_id,
+        )
+        self.captured_runs.append(record)
+        if hasattr(self, "comparison_dialog") and self.comparison_dialog is not None and self.comparison_dialog.isVisible():
+            self.comparison_dialog.refresh_runs()
+        return record
+
+    def _auto_capture_completed_run(self):
+        """Automatically capture completed simulation run once upon finishing."""
+        if self.engine is None or not getattr(self.engine, "finished", False):
+            return
+        if getattr(self, "_last_captured_engine_finished_state", False):
+            return
+        self._last_captured_engine_finished_state = True
+        self.capture_current_run()
+
+    def open_comparison_dialog(self) -> ScenarioComparisonDialog:
+        """Open or bring to focus the scenario comparison dialog."""
+        if not hasattr(self, "comparison_dialog") or self.comparison_dialog is None:
+            self.comparison_dialog = ScenarioComparisonDialog(self)
+        else:
+            self.comparison_dialog.refresh_runs()
+        self.comparison_dialog.show()
+        self.comparison_dialog.raise_()
+        self.comparison_dialog.activateWindow()
+        return self.comparison_dialog
 
 
 def main() -> int:
