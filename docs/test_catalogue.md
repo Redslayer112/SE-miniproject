@@ -5,6 +5,8 @@
 **Source:** SRS v0.2, SAD v1.0, STP v1.0 uploaded for this task.  
 **Important:** These are test specifications, not execution results. Do not mark any test Passed until the implementation exists and the test has actually run.
 
+**STP traceability note:** TC-NET-02 (TMS-F-011), TC-NET-04 (TMS-F-013), TC-SIM-03 (TMS-F-042), TC-MET-02 (TMS-F-051), and TC-MET-03 (TMS-F-052) are included in this draft catalogue but are missing from STP §13. Their corresponding STP traceability entries require team review and inclusion in a revised STP draft. This documentation gap does not establish that the associated functionality is implemented or tested.
+
 ## Common conventions
 
 - Use isolated temporary storage for tests that read/write scenarios or completed runs.
