@@ -21,13 +21,13 @@ import math
 from pathlib import Path
 import pytest
 
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QPointF, Qt, qInstallMessageHandler
+from PySide6.QtGui import QMouseEvent, QFont
 from PySide6.QtWidgets import QApplication, QMessageBox, QListWidgetItem
 
 from tms_sim.network.service import validate
 from tms_sim.network.serialization import network_from_dict
-from tms_sim.ui.app import Workbench, RoadCanvas
+from tms_sim.ui.app import Workbench, RoadCanvas, safe_font
 
 SAMPLE_SCENARIO_PATH = (
     Path(__file__).resolve().parent / "data" / "scenario" / "small_valid_scenario.json"
@@ -368,3 +368,98 @@ def test_cancel_road_drawing_and_escape_shortcut(workbench):
     )
     canvas.mousePressEvent(right_click)
     assert canvas.road_start_id is None
+
+
+def test_workbench_launch_produces_no_qt_font_warnings(qapp):
+    """Verify Workbench initialization and show emits zero QFont::setPointSize <= 0 warnings."""
+    captured_warnings = []
+
+    def msg_handler(msg_type, context, message):
+        if "setPointSize" in message or "Point size <= 0" in message:
+            captured_warnings.append(message)
+
+    old_handler = qInstallMessageHandler(msg_handler)
+    try:
+        win = Workbench()
+        win.show()
+        qapp.processEvents()
+
+        # Simulate mouse move over canvas in various tool modes
+        for tool in ("select", "add_intersection", "draw_road"):
+            win.set_tool_mode(tool)
+            for pt in (QPointF(60, 60), QPointF(200, 200)):
+                ev = QMouseEvent(
+                    QMouseEvent.Type.MouseMove,
+                    pt,
+                    pt,
+                    Qt.MouseButton.NoButton,
+                    Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+                win.canvas.mouseMoveEvent(ev)
+                qapp.processEvents()
+
+        win.close()
+    finally:
+        qInstallMessageHandler(old_handler)
+
+    assert len(captured_warnings) == 0, f"Expected 0 font warnings, got: {captured_warnings}"
+
+
+def test_safe_font_guarantees_positive_point_size():
+    """Verify safe_font handles unspecified, non-positive, or invalid point sizes safely."""
+    # Standard positive size
+    f1 = safe_font("Segoe UI", 10)
+    assert f1.pointSize() == 10
+
+    # Unspecified or negative size (-1)
+    f2 = safe_font("Segoe UI", -1)
+    assert f2.pointSize() > 0
+
+    # Zero size
+    f3 = safe_font("Segoe UI", 0)
+    assert f3.pointSize() > 0
+
+    # Custom valid size
+    f4 = safe_font("Segoe UI", 14, QFont.Weight.Bold)
+    assert f4.pointSize() == 14
+
+
+def test_mouse_move_event_hover_and_drag_behavior(workbench):
+    """Verify mouseMoveEvent safely updates hover cursor and panning offset without errors."""
+    canvas = workbench.canvas
+    net = canvas.scenario_data["network"]
+    i1 = net["intersections"][0]
+    i1_pt = canvas.scenario_to_screen(i1["position"][0], i1["position"][1])
+
+    # 1. Hovering over an intersection in select mode should show pointing hand
+    workbench.set_tool_mode("select")
+    ev1 = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        i1_pt,
+        i1_pt,
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    canvas.mouseMoveEvent(ev1)
+    assert canvas.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+    # 2. Hovering over empty space in select mode should show arrow cursor
+    empty_pt = QPointF(10.0, 10.0)
+    ev2 = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        empty_pt,
+        empty_pt,
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    canvas.mouseMoveEvent(ev2)
+    assert canvas.cursor().shape() == Qt.CursorShape.ArrowCursor
+
+    # 3. Add intersection mode should show cross cursor
+    workbench.set_tool_mode("add_intersection")
+    canvas.mouseMoveEvent(ev2)
+    assert canvas.cursor().shape() == Qt.CursorShape.CrossCursor
+

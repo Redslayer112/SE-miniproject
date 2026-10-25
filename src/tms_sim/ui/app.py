@@ -63,6 +63,15 @@ def generate_unique_id(prefix: str, existing_ids: list[str]) -> str:
     return candidate
 
 
+def safe_font(family: str = "Segoe UI", point_size: int = 10, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
+    """Return a QFont with a guaranteed positive integer point size, safely handling unspecified (-1) sizes."""
+    valid_size = int(point_size) if point_size and int(point_size) > 0 else 10
+    font = QFont(family, valid_size, weight)
+    if font.pointSize() <= 0:
+        font.setPointSize(valid_size)
+    return font
+
+
 class RoadCanvas(QWidget):
     """Draw the loaded scenario network, live traffic signals, and moving vehicles.
 
@@ -508,6 +517,19 @@ class RoadCanvas(QWidget):
             self.road_hover_pos = event.position()
             self.update()
 
+        if not self._is_panning:
+            if self.active_tool in ("select", "draw_road"):
+                hit_node = self.hit_test_intersection(event.position())
+                hit_edge = self.hit_test_segment(event.position()) if self.active_tool == "select" else None
+                if hit_node or hit_edge:
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
+            elif self.active_tool == "add_intersection":
+                self.setCursor(Qt.CursorShape.CrossCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -523,8 +545,6 @@ class RoadCanvas(QWidget):
                 # Revert any micro-displacement so click doesn't cause drift
                 self.pan_offset = self._press_pan_offset
                 self.handle_canvas_click(event.position())
-
-        super().mouseReleaseEvent(event)
 
         super().mouseReleaseEvent(event)
 
@@ -610,7 +630,7 @@ class RoadCanvas(QWidget):
                 midpoint = QPointF((start.x() + end.x()) / 2.0,
                                    (start.y() + end.y()) / 2.0)
                 painter.setPen(QColor("#344054"))
-                painter.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+                painter.setFont(safe_font("Segoe UI", 9, QFont.Weight.DemiBold))
                 painter.drawText(midpoint + QPointF(6, -road_width / 2.0 - 8),
                                  f'{segment.get("id", "Road")}')
 
@@ -700,7 +720,7 @@ class RoadCanvas(QWidget):
 
             if self.zoom_level >= 0.4:
                 painter.setPen(QColor("#1f2937"))
-                painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                painter.setFont(safe_font("Segoe UI", 9, QFont.Weight.Bold))
                 painter.drawText(point + QPointF(node_r + 4, -node_r), intersection["id"])
 
             control = str(intersection.get("control_type", "uncontrolled")).lower()
@@ -752,12 +772,12 @@ class RoadCanvas(QWidget):
 
         # Top HUD labels
         painter.setPen(QColor("#344054"))
-        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        painter.setFont(safe_font("Segoe UI", 10, QFont.Weight.DemiBold))
         painter.drawText(14, 24, "SCENARIO NETWORK  /  LIVE VEHICLES & SIGNALS")
 
         zoom_text = f"Zoom: {int(self.zoom_level * 100)}%"
         tool_text = f"Tool: {self.active_tool.replace('_', ' ').title()}"
-        painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Normal))
+        painter.setFont(safe_font("Segoe UI", 9, QFont.Weight.Normal))
         painter.setPen(QColor("#64748b"))
         hint_text = f"{tool_text}  •  {zoom_text}  •  Scroll: Zoom  •  Drag: Pan"
         painter.drawText(width - 320, 24, hint_text)
@@ -770,7 +790,7 @@ class RoadCanvas(QWidget):
         painter.setBrush(QColor(255, 255, 255, 220))
         painter.drawRoundedRect(lx, ly, legend_w, legend_h, 5, 5)
 
-        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Medium))
+        painter.setFont(safe_font("Segoe UI", 8, QFont.Weight.Medium))
         items = [
             (self.COLOR_GREEN, "Green (Go)", 12),
             (self.COLOR_YELLOW, "Yellow (Caution)", 92),
@@ -832,9 +852,11 @@ class Workbench(QMainWindow):
         self.status_label = QLabel("Ready")
         self.clock_label = QLabel("Simulation time: 0.0 s")
         self.speed_box = QComboBox()
+        self.speed_box.setFont(safe_font("Segoe UI", 10))
         self.speed_box.addItems(["0.5x", "1x", "2x", "4x"])
         self.speed_box.setCurrentText("1x")
 
+        self.setFont(safe_font("Segoe UI", 10))
         self.build_ui()
         self.update_metrics()
         self.validate_current_network()
@@ -845,7 +867,7 @@ class Workbench(QMainWindow):
                 background: #f6f8fb;
                 color: #1f2937;
                 font-family: 'Segoe UI';
-                font-size: 13px;
+                font-size: 10pt;
             }
             QFrame#panel {
                 background: white;
@@ -879,7 +901,7 @@ class Workbench(QMainWindow):
             }
             QPushButton#danger:hover { background: #fecaca; }
             QLabel#heading {
-                font-size: 18px;
+                font-size: 14pt;
                 font-weight: 700;
             }
             QLabel#muted { color: #667085; }
@@ -887,7 +909,7 @@ class Workbench(QMainWindow):
                 background: #f8fafc;
                 border: 1px solid #e2e8f0;
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 9pt;
             }
         """)
 
@@ -1055,6 +1077,7 @@ class Workbench(QMainWindow):
         inter_form.setSpacing(6)
 
         self.combo_inter_control = QComboBox()
+        self.combo_inter_control.setFont(safe_font("Segoe UI", 10))
         self.combo_inter_control.addItems(["uncontrolled", "signalized", "stop_controlled", "yield_controlled"])
         self.edit_inter_x = QLineEdit()
         self.edit_inter_y = QLineEdit()
@@ -1552,7 +1575,10 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     window = Workbench()
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    except KeyboardInterrupt:
+        return 0
 
 
 if __name__ == "__main__":
