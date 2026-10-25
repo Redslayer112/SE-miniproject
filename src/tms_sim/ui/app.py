@@ -29,6 +29,11 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QListWidget,
     QListWidgetItem,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QAbstractItemView,
+    QScrollArea,
 )
 
 from tms_sim.network import (
@@ -42,7 +47,7 @@ from tms_sim.network import (
 from tms_sim.network.serialization import network_from_dict
 from tms_sim.signal import SignalPlan, SignalPlanBlockedError
 from tms_sim.signal.serialization import plan_from_dict
-from tms_sim.sim.demand import DemandError
+from tms_sim.sim.demand import DemandError, validate_demand
 from tms_sim.sim.scenario import build_engine, load_scenario
 from tms_sim.sim.serialization import ScenarioFormatError, load_scenario_document
 
@@ -860,6 +865,7 @@ class Workbench(QMainWindow):
         self.build_ui()
         self.update_metrics()
         self.validate_current_network()
+        self.refresh_demand_ui()
 
     def build_ui(self):
         self.setStyleSheet("""
@@ -909,6 +915,22 @@ class Workbench(QMainWindow):
                 background: #f8fafc;
                 border: 1px solid #e2e8f0;
                 border-radius: 4px;
+                font-size: 9pt;
+            }
+            QTableWidget {
+                background: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-radius: 4px;
+                gridline-color: #f1f5f9;
+                font-size: 9pt;
+            }
+            QHeaderView::section {
+                background: #f8fafc;
+                color: #475467;
+                font-weight: 600;
+                padding: 4px;
+                border: none;
+                border-bottom: 1px solid #e2e8f0;
                 font-size: 9pt;
             }
         """)
@@ -1143,6 +1165,58 @@ class Workbench(QMainWindow):
         pl.addWidget(self.inspector_stack)
         right_layout.addWidget(props_frame)
 
+        # TRAFFIC DEMAND panel
+        demand_frame = self.panel("TRAFFIC DEMAND")
+        dl = demand_frame.layout()
+
+        self.lbl_demand_summary = QLabel("Configured Arrival Rates:")
+        self.lbl_demand_summary.setStyleSheet("font-weight: 600; color: #374151;")
+        dl.addWidget(self.lbl_demand_summary)
+
+        self.demand_table = QTableWidget()
+        self.demand_table.setColumnCount(2)
+        self.demand_table.setHorizontalHeaderLabels(["Road Segment", "Rate (veh/h)"])
+        self.demand_table.horizontalHeader().setStretchLastSection(True)
+        self.demand_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.demand_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.demand_table.setMaximumHeight(115)
+        self.demand_table.itemSelectionChanged.connect(self.on_demand_table_selection_changed)
+        dl.addWidget(self.demand_table)
+
+        self.lbl_demand_empty = QLabel("No traffic demand configured.\nSelect a road segment below to set arrival rates.")
+        self.lbl_demand_empty.setStyleSheet("color: #6b7280; font-style: italic; padding: 6px;")
+        self.lbl_demand_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dl.addWidget(self.lbl_demand_empty)
+
+        demand_form = QFormLayout()
+        demand_form.setSpacing(6)
+
+        self.combo_demand_segment = QComboBox()
+        self.combo_demand_segment.setFont(safe_font("Segoe UI", 10))
+        self.combo_demand_segment.currentTextChanged.connect(self.on_demand_combo_changed)
+
+        self.edit_demand_rate = QLineEdit()
+        self.edit_demand_rate.setPlaceholderText("e.g. 180.0")
+
+        demand_form.addRow("Entry Road:", self.combo_demand_segment)
+        demand_form.addRow("Rate (veh/h):", self.edit_demand_rate)
+        dl.addLayout(demand_form)
+
+        btn_row_demand = QHBoxLayout()
+        self.btn_set_demand = QPushButton("Set Arrival Rate")
+        self.btn_set_demand.setObjectName("primary")
+        self.btn_set_demand.clicked.connect(self.apply_demand_entry)
+
+        self.btn_remove_demand = QPushButton("Remove Entry")
+        self.btn_remove_demand.setObjectName("danger")
+        self.btn_remove_demand.clicked.connect(self.remove_demand_entry)
+
+        btn_row_demand.addWidget(self.btn_set_demand)
+        btn_row_demand.addWidget(self.btn_remove_demand)
+        dl.addLayout(btn_row_demand)
+
+        right_layout.addWidget(demand_frame)
+
         # NETWORK VALIDATION panel
         val_frame = self.panel("NETWORK VALIDATION")
         vl = val_frame.layout()
@@ -1176,9 +1250,15 @@ class Workbench(QMainWindow):
         ml.addWidget(self.remaining_label)
         right_layout.addWidget(metrics)
         right_layout.addStretch()
-        right.setMinimumWidth(260)
-        splitter.addWidget(right)
-        splitter.setSizes([180, 780, 280])
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        right_scroll.setWidget(right)
+        right_scroll.setMinimumWidth(280)
+        splitter.addWidget(right_scroll)
+        splitter.setSizes([180, 760, 300])
         outer.addWidget(splitter, 1)
 
         # Simulation controls
@@ -1275,6 +1355,9 @@ class Workbench(QMainWindow):
                 self.edit_seg_speed.setText(str(seg.get("speed_limit_mps", 13.9)))
                 self.inspector_stack.setCurrentIndex(2)
                 self.status_label.setText(f"Selected road segment '{element_id}'.")
+                idx = self.combo_demand_segment.findText(element_id)
+                if idx >= 0:
+                    self.combo_demand_segment.setCurrentIndex(idx)
                 return
 
         # No selection: display scenario overview
@@ -1337,6 +1420,190 @@ class Workbench(QMainWindow):
         self.on_network_modified()
         self.status_label.setText(f"Applied properties to road segment '{sid}'.")
 
+    def on_demand_combo_changed(self, seg_id: str):
+        """Update rate input and button text when the user picks a segment in the combo."""
+        demand = self.scenario_data.get("demand", {})
+        rates = demand.get("arrival_rates_vehicles_per_hour", {})
+        if seg_id in rates:
+            self.edit_demand_rate.setText(str(rates[seg_id]))
+            self.btn_set_demand.setText("Update Rate")
+            self.btn_remove_demand.setEnabled(True)
+        else:
+            self.edit_demand_rate.clear()
+            self.btn_set_demand.setText("Add Demand Entry")
+            self.btn_remove_demand.setEnabled(False)
+
+    def on_demand_table_selection_changed(self):
+        """Synchronize demand form and canvas selection when a row is selected in the demand table."""
+        selected_items = self.demand_table.selectedItems()
+        if not selected_items:
+            return
+        row = self.demand_table.currentRow()
+        seg_item = self.demand_table.item(row, 0)
+        rate_item = self.demand_table.item(row, 1)
+        if seg_item and rate_item:
+            seg_id = seg_item.text()
+            self.combo_demand_segment.blockSignals(True)
+            self.combo_demand_segment.setCurrentText(seg_id)
+            self.combo_demand_segment.blockSignals(False)
+            self.edit_demand_rate.setText(rate_item.text())
+            self.btn_set_demand.setText("Update Rate")
+            self.btn_remove_demand.setEnabled(True)
+            self.canvas.set_selection("segment", seg_id)
+
+    def refresh_demand_ui(self):
+        """Refresh the Traffic Demand table and segment dropdown from active scenario data."""
+        network = self.scenario_data.get("network", {})
+        segments = network.get("segments", [])
+        seg_ids = [s["id"] for s in segments if "id" in s]
+
+        # Update segment combobox choices
+        current_choice = self.combo_demand_segment.currentText()
+        self.combo_demand_segment.blockSignals(True)
+        self.combo_demand_segment.clear()
+        self.combo_demand_segment.addItems(seg_ids)
+        if current_choice in seg_ids:
+            self.combo_demand_segment.setCurrentText(current_choice)
+        elif seg_ids:
+            self.combo_demand_segment.setCurrentIndex(0)
+        self.combo_demand_segment.blockSignals(False)
+
+        # Update demand table
+        demand = self.scenario_data.setdefault("demand", {})
+        rates = demand.setdefault("arrival_rates_vehicles_per_hour", {})
+        self.demand_table.blockSignals(True)
+        self.demand_table.setRowCount(len(rates))
+
+        for row, (sid, rate) in enumerate(sorted(rates.items())):
+            item_sid = QTableWidgetItem(sid)
+            item_sid.setFlags(item_sid.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            item_rate = QTableWidgetItem(f"{float(rate):.1f}")
+            item_rate.setFlags(item_rate.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.demand_table.setItem(row, 0, item_sid)
+            self.demand_table.setItem(row, 1, item_rate)
+
+        self.demand_table.blockSignals(False)
+
+        if not rates:
+            self.demand_table.hide()
+            self.lbl_demand_empty.show()
+            self.btn_remove_demand.setEnabled(False)
+        else:
+            self.demand_table.show()
+            self.lbl_demand_empty.hide()
+            self.btn_remove_demand.setEnabled(True)
+
+        if self.combo_demand_segment.currentText():
+            self.on_demand_combo_changed(self.combo_demand_segment.currentText())
+
+    def apply_demand_entry(self) -> bool:
+        """Validate and apply an arrival rate for the chosen road segment."""
+        seg_id = self.combo_demand_segment.currentText().strip()
+        if not seg_id:
+            QMessageBox.warning(self, "No Road Selected", "Please select a road segment from the dropdown.")
+            return False
+
+        network = self.scenario_data.get("network", {})
+        segments = network.get("segments", [])
+        seg_obj = next((s for s in segments if s.get("id") == seg_id), None)
+        if not seg_obj:
+            QMessageBox.warning(self, "Invalid Road Segment", f"Road segment '{seg_id}' does not exist in the active network.")
+            return False
+
+        rate_text = self.edit_demand_rate.text().strip()
+        try:
+            rate_val = float(rate_text)
+            if not math.isfinite(rate_val) or rate_val < 0:
+                raise ValueError("Arrival rate must be a non-negative finite number (>= 0 veh/h).")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Arrival Rate", f"Invalid arrival rate:\n{exc}")
+            return False
+
+        # Ensure turning movements and turning ratios are valid for this entry segment
+        demand = self.scenario_data.setdefault("demand", {})
+        arrival_rates = demand.setdefault("arrival_rates_vehicles_per_hour", {})
+        turning_ratios = demand.setdefault("turning_ratios", {})
+        moves = network.setdefault("turning_movements", [])
+
+        seg_moves = [m for m in moves if m.get("from_segment") == seg_id]
+        if not seg_moves:
+            # Check if there is an outgoing segment at the intersection to connect to
+            dest_intersection = seg_obj.get("to")
+            outgoing_segs = [s for s in segments if s.get("from") == dest_intersection]
+            if outgoing_segs:
+                existing_tm_ids = [m["id"] for m in moves if "id" in m]
+                new_tm_id = generate_unique_id("TM", existing_tm_ids)
+                new_move = {
+                    "id": new_tm_id,
+                    "intersection": dest_intersection,
+                    "from_segment": seg_id,
+                    "to_segment": outgoing_segs[0]["id"],
+                }
+                moves.append(new_move)
+                turning_ratios[new_tm_id] = 1.0
+            else:
+                QMessageBox.warning(
+                    self,
+                    "No Outgoing Route",
+                    f"Road segment '{seg_id}' ends at intersection '{dest_intersection}', which has no outgoing road segments. "
+                    "Vehicles cannot navigate without an outgoing route. Connect an outgoing road segment before adding traffic demand."
+                )
+                return False
+        else:
+            # Seg moves exist; verify turning_ratios has entries for them
+            existing_ratios = {m["id"]: turning_ratios.get(m["id"]) for m in seg_moves if m["id"] in turning_ratios}
+            if not existing_ratios:
+                split = 1.0 / len(seg_moves)
+                for m in seg_moves:
+                    turning_ratios[m["id"]] = split
+
+        # Backup previous state in case of validation error
+        prev_rate = arrival_rates.get(seg_id)
+        arrival_rates[seg_id] = rate_val
+
+        # Validate with backend demand validator
+        try:
+            rates_dict = arrival_rates
+            ratios_dict = {}
+            moves_map = {m["id"]: m for m in moves}
+            for mid, r in turning_ratios.items():
+                if mid in moves_map:
+                    ratios_dict.setdefault(moves_map[mid].get("from_segment"), {})[mid] = r
+            validate_demand(rates_dict, ratios_dict)
+        except DemandError as exc:
+            if prev_rate is not None:
+                arrival_rates[seg_id] = prev_rate
+            else:
+                arrival_rates.pop(seg_id, None)
+            QMessageBox.warning(self, "Demand Validation Error", f"Cannot apply demand rate:\n{exc}")
+            return False
+
+        self.on_network_modified()
+        self.refresh_demand_ui()
+        self.status_label.setText(f"Traffic demand configured: '{seg_id}' -> {rate_val:.1f} veh/h.")
+        return True
+
+    def remove_demand_entry(self) -> bool:
+        """Remove arrival rate entry for the selected segment."""
+        seg_id = self.combo_demand_segment.currentText().strip()
+        demand = self.scenario_data.get("demand", {})
+        rates = demand.get("arrival_rates_vehicles_per_hour", {})
+        if seg_id not in rates:
+            return False
+
+        rates.pop(seg_id, None)
+        # Clean up turning ratios for movements originating from this segment
+        moves = self.scenario_data.get("network", {}).get("turning_movements", [])
+        from_moves = [m["id"] for m in moves if m.get("from_segment") == seg_id]
+        t_ratios = demand.get("turning_ratios", {})
+        for mid in from_moves:
+            t_ratios.pop(mid, None)
+
+        self.on_network_modified()
+        self.refresh_demand_ui()
+        self.status_label.setText(f"Removed traffic demand for road '{seg_id}'.")
+        return True
+
     def delete_selected_object(self):
         """Invoke deletion on the currently selected canvas object with user feedback."""
         success, msg = self.canvas.delete_selected()
@@ -1395,10 +1662,11 @@ class Workbench(QMainWindow):
                 self.canvas.set_selection(issue.element_type, issue.element_id)
 
     def on_network_modified(self):
-        """Synchronize engine, metrics, canvas, and validation whenever network changes."""
+        """Synchronize engine, metrics, canvas, demand, and validation whenever network changes."""
         self.timer.stop()
         self.update_metrics()
         self.canvas.reparse_signal_plans()
+        self.refresh_demand_ui()
         val_result = self.validate_current_network()
 
         # Re-initialize engine if network is valid
@@ -1417,6 +1685,8 @@ class Workbench(QMainWindow):
                 self.canvas.engine = self.engine
                 self.change_speed(self.speed_box.currentText())
                 self.status_label.setText("Network updated. Simulation ready.")
+            except DemandError as exc:
+                self.status_label.setText(f"Simulation engine paused: demand configuration error ({exc})")
             except Exception as exc:
                 self.status_label.setText(f"Simulation engine paused: {exc}")
         else:
@@ -1562,6 +1832,7 @@ class Workbench(QMainWindow):
         self.canvas.set_scenario(self.engine, self.scenario_data)
         self.update_metrics()
         self.validate_current_network()
+        self.refresh_demand_ui()
 
         self.status_label.setText(f"Scenario '{self.scenario_path.name}' loaded successfully")
         return True
