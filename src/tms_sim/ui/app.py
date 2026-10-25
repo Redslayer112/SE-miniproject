@@ -45,13 +45,42 @@ from tms_sim.network import (
     ValidationResult,
 )
 from tms_sim.network.serialization import network_from_dict
-from tms_sim.signal import SignalPlan, SignalPlanBlockedError
-from tms_sim.signal.serialization import plan_from_dict
+from tms_sim.signal import SignalPlan, SignalPhase, SignalPlanBlockedError
+from tms_sim.signal.validation import validate_signal_plan
+from tms_sim.signal.serialization import plan_from_dict, plan_to_dict
 from tms_sim.sim.demand import DemandError, validate_demand
 from tms_sim.sim.scenario import build_engine, load_scenario
 from tms_sim.sim.serialization import ScenarioFormatError, load_scenario_document
 
 logger = logging.getLogger(__name__)
+
+
+def get_scenario_signal_plans(scenario_data: dict) -> list[dict]:
+    """Retrieve raw signal plan dictionaries from scenario data."""
+    if "signal_plans" in scenario_data and isinstance(scenario_data["signal_plans"], list):
+        return scenario_data["signal_plans"]
+    elif "signal_plan" in scenario_data and isinstance(scenario_data["signal_plan"], dict):
+        return [scenario_data["signal_plan"]]
+    return []
+
+
+def set_scenario_signal_plans(scenario_data: dict, plans_list: list[dict]) -> None:
+    """Store raw signal plan dictionaries preserving single/multi plan schema constraints."""
+    if len(plans_list) > 1:
+        scenario_data["signal_plans"] = plans_list
+        scenario_data.pop("signal_plan", None)
+    elif len(plans_list) == 1:
+        if "signal_plans" in scenario_data:
+            scenario_data["signal_plans"] = plans_list
+            scenario_data.pop("signal_plan", None)
+        else:
+            scenario_data["signal_plan"] = plans_list[0]
+            scenario_data.pop("signal_plans", None)
+    else:
+        if "signal_plans" in scenario_data:
+            scenario_data["signal_plans"] = []
+        elif "signal_plan" in scenario_data:
+            scenario_data["signal_plan"] = {}
 
 
 def generate_unique_id(prefix: str, existing_ids: list[str]) -> str:
@@ -152,9 +181,7 @@ class RoadCanvas(QWidget):
         """Parse signal plans from scenario_data for visualization."""
         self.signal_plans = {}
         if self.scenario_data:
-            raw_plans = self.scenario_data.get("signal_plans") or (
-                [self.scenario_data["signal_plan"]] if self.scenario_data.get("signal_plan") else []
-            )
+            raw_plans = get_scenario_signal_plans(self.scenario_data)
             for p in raw_plans:
                 try:
                     plan_obj = plan_from_dict({"signal_plan": p})
@@ -380,12 +407,9 @@ class RoadCanvas(QWidget):
 
             network["intersections"] = [i for i in network.get("intersections", []) if i.get("id") != iid]
             # Clean up signal plan if any
-            if self.scenario_data.get("signal_plan", {}).get("intersection_id") == iid:
-                self.scenario_data.pop("signal_plan", None)
-            if self.scenario_data.get("signal_plans"):
-                self.scenario_data["signal_plans"] = [
-                    p for p in self.scenario_data["signal_plans"] if p.get("intersection_id") != iid
-                ]
+            plans = get_scenario_signal_plans(self.scenario_data)
+            updated_plans = [p for p in plans if p.get("intersection_id") != iid]
+            set_scenario_signal_plans(self.scenario_data, updated_plans)
             self.set_selection(None, None)
             self.network_modified.emit()
             return True, f"Deleted intersection '{iid}'."
@@ -408,12 +432,11 @@ class RoadCanvas(QWidget):
                     demand["turning_ratios"].pop(mid, None)
 
             # Clean up signal plan phases referencing removed movements
-            raw_plans = self.scenario_data.get("signal_plans") or (
-                [self.scenario_data["signal_plan"]] if self.scenario_data.get("signal_plan") else []
-            )
+            raw_plans = get_scenario_signal_plans(self.scenario_data)
             for plan_dict in raw_plans:
                 for ph in plan_dict.get("phases", []):
                     ph["movement_ids"] = [mid for mid in ph.get("movement_ids", []) if mid not in removed_moves]
+            set_scenario_signal_plans(self.scenario_data, raw_plans)
 
             self.set_selection(None, None)
             self.network_modified.emit()
@@ -866,6 +889,7 @@ class Workbench(QMainWindow):
         self.update_metrics()
         self.validate_current_network()
         self.refresh_demand_ui()
+        self.refresh_signal_plans_ui()
 
     def build_ui(self):
         self.setStyleSheet("""
@@ -1217,6 +1241,108 @@ class Workbench(QMainWindow):
 
         right_layout.addWidget(demand_frame)
 
+        # SIGNAL PLANS panel
+        signal_frame = self.panel("SIGNAL PLANS")
+        sl = signal_frame.layout()
+
+        sig_header_layout = QHBoxLayout()
+        self.lbl_signal_inter = QLabel("Intersection:")
+        self.lbl_signal_inter.setStyleSheet("font-weight: 600; color: #374151;")
+        self.combo_signal_plan = QComboBox()
+        self.combo_signal_plan.setFont(safe_font("Segoe UI", 10))
+        self.combo_signal_plan.currentIndexChanged.connect(self.on_signal_plan_combo_changed)
+        sig_header_layout.addWidget(self.lbl_signal_inter)
+        sig_header_layout.addWidget(self.combo_signal_plan, 1)
+        sl.addLayout(sig_header_layout)
+
+        self.lbl_plan_cycle = QLabel("Cycle duration: 0.0 s")
+        self.lbl_plan_cycle.setStyleSheet("color: #2563eb; font-weight: 700; margin-top: 2px; margin-bottom: 4px;")
+        sl.addWidget(self.lbl_plan_cycle)
+
+        self.phase_table = QTableWidget()
+        self.phase_table.setColumnCount(5)
+        self.phase_table.setHorizontalHeaderLabels(["#", "Green (s)", "Yellow (s)", "All-Red (s)", "Movements"])
+        self.phase_table.horizontalHeader().setStretchLastSection(True)
+        self.phase_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.phase_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.phase_table.setMaximumHeight(115)
+        self.phase_table.itemSelectionChanged.connect(self.on_phase_table_selection_changed)
+        sl.addWidget(self.phase_table)
+
+        self.lbl_plan_empty = QLabel("No signal plans configured.")
+        self.lbl_plan_empty.setStyleSheet("color: #6b7280; font-style: italic; padding: 6px;")
+        self.lbl_plan_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sl.addWidget(self.lbl_plan_empty)
+
+        self.btn_create_plan = QPushButton("Create Signal Plan")
+        self.btn_create_plan.setObjectName("primary")
+        self.btn_create_plan.clicked.connect(self.create_signal_plan_for_selected)
+        sl.addWidget(self.btn_create_plan)
+
+        # Phase Form details
+        self.phase_form_widget = QWidget()
+        pf_layout = QVBoxLayout(self.phase_form_widget)
+        pf_layout.setContentsMargins(0, 0, 0, 0)
+        pf_layout.setSpacing(4)
+
+        phase_grid = QFormLayout()
+        phase_grid.setSpacing(4)
+
+        self.spin_phase_order = QSpinBox()
+        self.spin_phase_order.setRange(1, 99)
+        self.spin_phase_order.setValue(1)
+
+        self.edit_phase_green = QLineEdit()
+        self.edit_phase_green.setPlaceholderText("e.g. 20.0")
+
+        self.edit_phase_yellow = QLineEdit()
+        self.edit_phase_yellow.setPlaceholderText("e.g. 3.0")
+
+        self.edit_phase_all_red = QLineEdit()
+        self.edit_phase_all_red.setPlaceholderText("e.g. 1.0")
+
+        phase_grid.addRow("Phase Order:", self.spin_phase_order)
+        phase_grid.addRow("Green (s):", self.edit_phase_green)
+        phase_grid.addRow("Yellow (s):", self.edit_phase_yellow)
+        phase_grid.addRow("All-Red (s):", self.edit_phase_all_red)
+        pf_layout.addLayout(phase_grid)
+
+        lbl_moves = QLabel("Assigned Movements:")
+        lbl_moves.setStyleSheet("font-weight: 600; color: #374151; margin-top: 4px;")
+        pf_layout.addWidget(lbl_moves)
+
+        self.list_phase_movements = QListWidget()
+        self.list_phase_movements.setMaximumHeight(85)
+        pf_layout.addWidget(self.list_phase_movements)
+
+        # Phase action buttons: Apply Edits / Add Phase
+        btn_phase_actions = QHBoxLayout()
+        self.btn_apply_phase = QPushButton("Apply Phase")
+        self.btn_apply_phase.setObjectName("primary")
+        self.btn_apply_phase.clicked.connect(self.apply_phase_edits)
+        self.btn_add_phase = QPushButton("Add Phase")
+        self.btn_add_phase.clicked.connect(self.add_new_phase)
+        btn_phase_actions.addWidget(self.btn_apply_phase)
+        btn_phase_actions.addWidget(self.btn_add_phase)
+        pf_layout.addLayout(btn_phase_actions)
+
+        # Reordering & Deletion: Up, Down, Remove
+        btn_reorder_layout = QHBoxLayout()
+        self.btn_phase_up = QPushButton("▲ Up")
+        self.btn_phase_up.clicked.connect(lambda: self.reorder_phase(-1))
+        self.btn_phase_down = QPushButton("▼ Down")
+        self.btn_phase_down.clicked.connect(lambda: self.reorder_phase(1))
+        self.btn_remove_phase = QPushButton("Remove")
+        self.btn_remove_phase.setObjectName("danger")
+        self.btn_remove_phase.clicked.connect(self.remove_selected_phase)
+        btn_reorder_layout.addWidget(self.btn_phase_up)
+        btn_reorder_layout.addWidget(self.btn_phase_down)
+        btn_reorder_layout.addWidget(self.btn_remove_phase)
+        pf_layout.addLayout(btn_reorder_layout)
+
+        sl.addWidget(self.phase_form_widget)
+        right_layout.addWidget(signal_frame)
+
         # NETWORK VALIDATION panel
         val_frame = self.panel("NETWORK VALIDATION")
         vl = val_frame.layout()
@@ -1343,6 +1469,11 @@ class Workbench(QMainWindow):
                 self.edit_inter_y.setText(str(pos[1]))
                 self.inspector_stack.setCurrentIndex(1)
                 self.status_label.setText(f"Selected intersection '{element_id}'.")
+                sig_idx = self.combo_signal_plan.findData(element_id)
+                if sig_idx < 0:
+                    sig_idx = self.combo_signal_plan.findText(element_id)
+                if sig_idx >= 0:
+                    self.combo_signal_plan.setCurrentIndex(sig_idx)
                 return
 
         elif element_type == "segment":
@@ -1604,6 +1735,440 @@ class Workbench(QMainWindow):
         self.status_label.setText(f"Removed traffic demand for road '{seg_id}'.")
         return True
 
+    def refresh_signal_plans_ui(self):
+        """Update Signal Plan Editor to match active scenario and network."""
+        network = self.scenario_data.get("network", {})
+        intersections = network.get("intersections", [])
+        raw_plans = get_scenario_signal_plans(self.scenario_data)
+        plan_iids = {p.get("intersection_id") for p in raw_plans if p.get("intersection_id")}
+        signalized_iids = [
+            i.get("id") for i in intersections
+            if str(i.get("control_type", "")).lower() == "signalized" and i.get("id")
+        ]
+        all_iids = sorted(list(plan_iids.union(signalized_iids)))
+
+        current_iid = self.combo_signal_plan.currentData()
+        self.combo_signal_plan.blockSignals(True)
+        self.combo_signal_plan.clear()
+
+        if not all_iids:
+            self.combo_signal_plan.addItem("No Signalized Intersections", "")
+            self.combo_signal_plan.setEnabled(False)
+            self.combo_signal_plan.blockSignals(False)
+            self.phase_table.hide()
+            self.phase_form_widget.hide()
+            self.btn_create_plan.hide()
+            self.lbl_plan_empty.show()
+            self.lbl_plan_empty.setText("No signalized intersections in scenario.\nSet an intersection control type to 'signalized' in the Inspector.")
+            self.lbl_plan_cycle.setText("Cycle duration: 0.0 s")
+            return
+
+        self.combo_signal_plan.setEnabled(True)
+        select_idx = 0
+        for idx, iid in enumerate(all_iids):
+            label = f"{iid} (Signalized)" if iid in signalized_iids else f"{iid} (Uncontrolled)"
+            self.combo_signal_plan.addItem(label, iid)
+            if iid == current_iid:
+                select_idx = idx
+
+        self.combo_signal_plan.setCurrentIndex(select_idx)
+        self.combo_signal_plan.blockSignals(False)
+
+        self._load_selected_plan_to_ui()
+
+    def _load_selected_plan_to_ui(self):
+        """Load selected intersection's signal plan details into table and form."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            self.phase_table.hide()
+            self.phase_form_widget.hide()
+            self.btn_create_plan.hide()
+            self.lbl_plan_empty.show()
+            self.lbl_plan_cycle.setText("Cycle duration: 0.0 s")
+            return
+
+        raw_plans = get_scenario_signal_plans(self.scenario_data)
+        plan_dict = next((p for p in raw_plans if p.get("intersection_id") == iid), None)
+
+        if not plan_dict:
+            self.phase_table.hide()
+            self.phase_form_widget.hide()
+            self.btn_create_plan.show()
+            self.lbl_plan_empty.show()
+            self.lbl_plan_empty.setText(f"No signal plan configured for '{iid}'.\nClick 'Create Signal Plan' to add one.")
+            self.lbl_plan_cycle.setText("Cycle duration: 0.0 s")
+            return
+
+        phases = plan_dict.get("phases", [])
+        if not phases:
+            self.phase_table.hide()
+            self.phase_form_widget.show()
+            self.btn_create_plan.hide()
+            self.lbl_plan_empty.show()
+            self.lbl_plan_empty.setText(f"Signal plan for '{iid}' has no phases.\nFill timing fields below and click 'Add Phase'.")
+            self.lbl_plan_cycle.setText("Cycle duration: 0.0 s")
+            self.refresh_movements_checklist(iid, [])
+            return
+
+        self.lbl_plan_empty.hide()
+        self.btn_create_plan.hide()
+        self.phase_table.show()
+        self.phase_form_widget.show()
+
+        sorted_phases = sorted(phases, key=lambda p: p.get("order", 0))
+
+        cycle = sum(
+            float(p.get("green_s", 0.0)) + float(p.get("yellow_s", 0.0)) + float(p.get("all_red_s", 0.0))
+            for p in sorted_phases
+        )
+        self.lbl_plan_cycle.setText(f"Cycle duration: {cycle:.1f} s")
+
+        prev_row = self.phase_table.currentRow()
+        self.phase_table.blockSignals(True)
+        self.phase_table.setRowCount(len(sorted_phases))
+        for row, p in enumerate(sorted_phases):
+            order_item = QTableWidgetItem(str(p.get("order", row + 1)))
+            green_item = QTableWidgetItem(f"{float(p.get('green_s', 0.0)):.1f}")
+            yellow_item = QTableWidgetItem(f"{float(p.get('yellow_s', 0.0)):.1f}")
+            all_red_item = QTableWidgetItem(f"{float(p.get('all_red_s', 0.0)):.1f}")
+            m_list = p.get("movement_ids", [])
+            moves_item = QTableWidgetItem(", ".join(m_list))
+
+            for it in (order_item, green_item, yellow_item, all_red_item, moves_item):
+                it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+            self.phase_table.setItem(row, 0, order_item)
+            self.phase_table.setItem(row, 1, green_item)
+            self.phase_table.setItem(row, 2, yellow_item)
+            self.phase_table.setItem(row, 3, all_red_item)
+            self.phase_table.setItem(row, 4, moves_item)
+
+        sel_row = prev_row if 0 <= prev_row < len(sorted_phases) else 0
+        self.phase_table.selectRow(sel_row)
+        self.phase_table.blockSignals(False)
+        self.on_phase_table_selection_changed()
+
+    def on_signal_plan_combo_changed(self):
+        """Handle intersection selection change in signal plan combo."""
+        self._load_selected_plan_to_ui()
+
+    def on_phase_table_selection_changed(self):
+        """Update form inputs and movement checklist when phase table selection changes."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            return
+        row = self.phase_table.currentRow()
+        raw_plans = get_scenario_signal_plans(self.scenario_data)
+        plan_dict = next((p for p in raw_plans if p.get("intersection_id") == iid), None)
+        if not plan_dict:
+            return
+        phases = sorted(plan_dict.get("phases", []), key=lambda p: p.get("order", 0))
+        if 0 <= row < len(phases):
+            p = phases[row]
+            self.spin_phase_order.setValue(int(p.get("order", row + 1)))
+            self.edit_phase_green.setText(f"{float(p.get('green_s', 20.0)):.1f}")
+            self.edit_phase_yellow.setText(f"{float(p.get('yellow_s', 3.0)):.1f}")
+            self.edit_phase_all_red.setText(f"{float(p.get('all_red_s', 1.0)):.1f}")
+            self.refresh_movements_checklist(iid, p.get("movement_ids", []))
+            self.btn_apply_phase.setEnabled(True)
+            self.btn_remove_phase.setEnabled(True)
+            self.btn_phase_up.setEnabled(row > 0)
+            self.btn_phase_down.setEnabled(row < len(phases) - 1)
+        else:
+            self.refresh_movements_checklist(iid, [])
+            self.btn_apply_phase.setEnabled(False)
+            self.btn_remove_phase.setEnabled(False)
+            self.btn_phase_up.setEnabled(False)
+            self.btn_phase_down.setEnabled(False)
+
+    def refresh_movements_checklist(self, iid: str, selected_moves=None):
+        """Populate turning movements checklist for the given intersection."""
+        self.list_phase_movements.clear()
+        moves = [
+            m for m in self.scenario_data.get("network", {}).get("turning_movements", [])
+            if m.get("intersection") == iid
+        ]
+        if not moves:
+            item = QListWidgetItem("No turning movements at this intersection")
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.list_phase_movements.addItem(item)
+            return
+
+        sel_set = set(selected_moves or [])
+        for m in moves:
+            mid = m.get("id", "")
+            from_seg = m.get("from_segment", "?")
+            to_seg = m.get("to_segment", "?")
+            item = QListWidgetItem(f"{mid} ({from_seg} → {to_seg})")
+            item.setData(Qt.ItemDataRole.UserRole, mid)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if mid in sel_set else Qt.CheckState.Unchecked)
+            self.list_phase_movements.addItem(item)
+
+    def get_selected_movement_ids(self) -> list[str]:
+        """Return list of turning movement IDs currently checked in the checklist."""
+        selected = []
+        for i in range(self.list_phase_movements.count()):
+            item = self.list_phase_movements.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                mid = item.data(Qt.ItemDataRole.UserRole)
+                if mid:
+                    selected.append(mid)
+        return selected
+
+    def create_signal_plan_for_selected(self):
+        """Create a default valid signal plan for the selected signalized intersection."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            return
+        moves = [
+            m.get("id") for m in self.scenario_data.get("network", {}).get("turning_movements", [])
+            if m.get("intersection") == iid and m.get("id")
+        ]
+        if not moves:
+            QMessageBox.warning(
+                self,
+                "No Turning Movements",
+                f"Intersection '{iid}' has no turning movements. Add turning movements connecting roads to this intersection first."
+            )
+            return
+
+        network = self.scenario_data.get("network", {})
+        inter = next((i for i in network.get("intersections", []) if i.get("id") == iid), None)
+        if inter and inter.get("control_type") != "signalized":
+            inter["control_type"] = "signalized"
+
+        new_plan = {
+            "intersection_id": iid,
+            "phases": [
+                {
+                    "order": 1,
+                    "movement_ids": [moves[0]],
+                    "green_s": 20.0,
+                    "yellow_s": 3.0,
+                    "all_red_s": 1.0,
+                }
+            ],
+        }
+
+        raw_plans = copy.deepcopy(get_scenario_signal_plans(self.scenario_data))
+        raw_plans.append(new_plan)
+
+        try:
+            plan_obj = plan_from_dict({"signal_plan": new_plan})
+            net_obj = network_from_dict(self.scenario_data)
+            res = validate_signal_plan(plan_obj, net_obj)
+            if not res.is_valid:
+                err_msgs = "\n".join(f"• [{e.code}] {e.message}" for e in res.errors)
+                QMessageBox.warning(self, "Invalid Signal Plan", f"Could not create plan:\n{err_msgs}")
+                return
+        except Exception as exc:
+            QMessageBox.warning(self, "Validation Error", f"Could not create plan:\n{exc}")
+            return
+
+        set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self.on_network_modified()
+        self.status_label.setText(f"Created signal plan for intersection '{iid}'.")
+
+    def apply_phase_edits(self) -> bool:
+        """Validate and apply edits to the currently selected signal phase."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            return False
+        row = self.phase_table.currentRow()
+        raw_plans = copy.deepcopy(get_scenario_signal_plans(self.scenario_data))
+        plan_dict = next((p for p in raw_plans if p.get("intersection_id") == iid), None)
+        if not plan_dict:
+            return False
+        phases = sorted(plan_dict.get("phases", []), key=lambda p: p.get("order", 0))
+        if not (0 <= row < len(phases)):
+            QMessageBox.warning(self, "No Phase Selected", "Please select a phase from the table to edit.")
+            return False
+
+        try:
+            green_val = float(self.edit_phase_green.text().strip())
+            yellow_val = float(self.edit_phase_yellow.text().strip())
+            all_red_val = float(self.edit_phase_all_red.text().strip())
+            order_val = int(self.spin_phase_order.value())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Timing Values", f"Durations must be valid numeric values:\n{exc}")
+            return False
+
+        checked_moves = self.get_selected_movement_ids()
+        if not checked_moves:
+            QMessageBox.warning(self, "No Movements Assigned", "A phase must have at least one turning movement assigned.")
+            return False
+
+        phases[row] = {
+            "order": order_val,
+            "movement_ids": checked_moves,
+            "green_s": green_val,
+            "yellow_s": yellow_val,
+            "all_red_s": all_red_val,
+        }
+        plan_dict["phases"] = phases
+
+        try:
+            plan_obj = plan_from_dict({"signal_plan": plan_dict})
+            net_obj = network_from_dict(self.scenario_data)
+            res = validate_signal_plan(plan_obj, net_obj)
+        except Exception as exc:
+            QMessageBox.warning(self, "Signal Plan Format Error", f"Invalid signal plan structure:\n{exc}")
+            return False
+
+        if not res.is_valid:
+            err_msgs = "\n".join(f"• [{e.code}] {e.message}" for e in res.errors)
+            QMessageBox.warning(self, "Signal Plan Validation Error", f"Cannot apply phase changes:\n\n{err_msgs}")
+            return False
+
+        set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self.on_network_modified()
+        warn_text = f" ({len(res.warnings)} warnings)" if res.warnings else ""
+        self.status_label.setText(f"Applied phase {order_val} for '{iid}'{warn_text}.")
+        return True
+
+    def add_new_phase(self) -> bool:
+        """Add a new phase to the currently selected signal plan."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            return False
+        raw_plans = copy.deepcopy(get_scenario_signal_plans(self.scenario_data))
+        plan_dict = next((p for p in raw_plans if p.get("intersection_id") == iid), None)
+        if not plan_dict:
+            plan_dict = {"intersection_id": iid, "phases": []}
+            raw_plans.append(plan_dict)
+
+        phases = plan_dict.get("phases", [])
+        next_order = max([p.get("order", 0) for p in phases], default=0) + 1
+
+        try:
+            green_text = self.edit_phase_green.text().strip()
+            yellow_text = self.edit_phase_yellow.text().strip()
+            all_red_text = self.edit_phase_all_red.text().strip()
+            green_val = float(green_text) if green_text else 20.0
+            yellow_val = float(yellow_text) if yellow_text else 3.0
+            all_red_val = float(all_red_text) if all_red_text else 1.0
+            order_val = int(self.spin_phase_order.value()) if self.spin_phase_order.value() != 1 or not phases else next_order
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Timing Values", f"Durations must be valid numeric values:\n{exc}")
+            return False
+
+        checked_moves = self.get_selected_movement_ids()
+        if not checked_moves:
+            all_moves = [
+                m.get("id") for m in self.scenario_data.get("network", {}).get("turning_movements", [])
+                if m.get("intersection") == iid and m.get("id")
+            ]
+            assigned_moves = {m for p in phases for m in p.get("movement_ids", [])}
+            unassigned = [m for m in all_moves if m not in assigned_moves]
+            checked_moves = unassigned if unassigned else all_moves[:1]
+
+        new_phase = {
+            "order": order_val,
+            "movement_ids": checked_moves,
+            "green_s": green_val,
+            "yellow_s": yellow_val,
+            "all_red_s": all_red_val,
+        }
+        phases.append(new_phase)
+        plan_dict["phases"] = phases
+
+        try:
+            plan_obj = plan_from_dict({"signal_plan": plan_dict})
+            net_obj = network_from_dict(self.scenario_data)
+            res = validate_signal_plan(plan_obj, net_obj)
+        except Exception as exc:
+            QMessageBox.warning(self, "Signal Plan Format Error", f"Invalid signal plan structure:\n{exc}")
+            return False
+
+        if not res.is_valid:
+            err_msgs = "\n".join(f"• [{e.code}] {e.message}" for e in res.errors)
+            QMessageBox.warning(self, "Signal Plan Validation Error", f"Cannot add phase:\n\n{err_msgs}")
+            return False
+
+        set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self.on_network_modified()
+        self.phase_table.selectRow(self.phase_table.rowCount() - 1)
+        warn_text = f" ({len(res.warnings)} warnings)" if res.warnings else ""
+        self.status_label.setText(f"Added phase {order_val} to '{iid}'{warn_text}.")
+        return True
+
+    def remove_selected_phase(self) -> bool:
+        """Remove currently selected phase, renumbering remaining phases sequentially."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            return False
+        row = self.phase_table.currentRow()
+        raw_plans = copy.deepcopy(get_scenario_signal_plans(self.scenario_data))
+        plan_dict = next((p for p in raw_plans if p.get("intersection_id") == iid), None)
+        if not plan_dict:
+            return False
+        phases = sorted(plan_dict.get("phases", []), key=lambda p: p.get("order", 0))
+        if not (0 <= row < len(phases)):
+            return False
+
+        phases.pop(row)
+        for i, p in enumerate(phases):
+            p["order"] = i + 1
+        plan_dict["phases"] = phases
+
+        try:
+            plan_obj = plan_from_dict({"signal_plan": plan_dict})
+            net_obj = network_from_dict(self.scenario_data)
+            res = validate_signal_plan(plan_obj, net_obj)
+        except Exception as exc:
+            QMessageBox.warning(self, "Signal Plan Format Error", f"Invalid signal plan structure:\n{exc}")
+            return False
+
+        if not res.is_valid:
+            err_msgs = "\n".join(f"• [{e.code}] {e.message}" for e in res.errors)
+            QMessageBox.warning(self, "Signal Plan Validation Error", f"Cannot remove phase:\n\n{err_msgs}")
+            return False
+
+        set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self.on_network_modified()
+        self.status_label.setText(f"Removed phase from '{iid}'.")
+        return True
+
+    def reorder_phase(self, direction: int) -> bool:
+        """Move selected phase Up (-1) or Down (+1), renumbering orders sequentially."""
+        iid = self.combo_signal_plan.currentData()
+        if not iid:
+            return False
+        row = self.phase_table.currentRow()
+        raw_plans = copy.deepcopy(get_scenario_signal_plans(self.scenario_data))
+        plan_dict = next((p for p in raw_plans if p.get("intersection_id") == iid), None)
+        if not plan_dict:
+            return False
+        phases = sorted(plan_dict.get("phases", []), key=lambda p: p.get("order", 0))
+        target_row = row + direction
+        if not (0 <= target_row < len(phases)):
+            return False
+
+        phases[row], phases[target_row] = phases[target_row], phases[row]
+        for i, p in enumerate(phases):
+            p["order"] = i + 1
+        plan_dict["phases"] = phases
+
+        try:
+            plan_obj = plan_from_dict({"signal_plan": plan_dict})
+            net_obj = network_from_dict(self.scenario_data)
+            res = validate_signal_plan(plan_obj, net_obj)
+        except Exception as exc:
+            QMessageBox.warning(self, "Signal Plan Format Error", f"Invalid signal plan structure:\n{exc}")
+            return False
+
+        if not res.is_valid:
+            err_msgs = "\n".join(f"• [{e.code}] {e.message}" for e in res.errors)
+            QMessageBox.warning(self, "Signal Plan Validation Error", f"Cannot reorder phases:\n\n{err_msgs}")
+            return False
+
+        set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self.on_network_modified()
+        self.phase_table.selectRow(target_row)
+        self.status_label.setText(f"Reordered phases for '{iid}'.")
+        return True
+
     def delete_selected_object(self):
         """Invoke deletion on the currently selected canvas object with user feedback."""
         success, msg = self.canvas.delete_selected()
@@ -1662,19 +2227,18 @@ class Workbench(QMainWindow):
                 self.canvas.set_selection(issue.element_type, issue.element_id)
 
     def on_network_modified(self):
-        """Synchronize engine, metrics, canvas, demand, and validation whenever network changes."""
+        """Synchronize engine, metrics, canvas, demand, signal plans, and validation whenever network changes."""
         self.timer.stop()
         self.update_metrics()
         self.canvas.reparse_signal_plans()
         self.refresh_demand_ui()
+        self.refresh_signal_plans_ui()
         val_result = self.validate_current_network()
 
         # Re-initialize engine if network is valid
         if val_result.is_valid:
             try:
-                raw_plans = self.scenario_data.get("signal_plans") or (
-                    [self.scenario_data["signal_plan"]] if self.scenario_data.get("signal_plan") else []
-                )
+                raw_plans = get_scenario_signal_plans(self.scenario_data)
                 plans = [plan_from_dict({"signal_plan": p}) for p in raw_plans]
                 self.engine = build_engine(
                     network_from_dict(self.scenario_data),
@@ -1687,6 +2251,8 @@ class Workbench(QMainWindow):
                 self.status_label.setText("Network updated. Simulation ready.")
             except DemandError as exc:
                 self.status_label.setText(f"Simulation engine paused: demand configuration error ({exc})")
+            except SignalPlanBlockedError as exc:
+                self.status_label.setText(f"Simulation engine paused: signal plan error ({exc})")
             except Exception as exc:
                 self.status_label.setText(f"Simulation engine paused: {exc}")
         else:
@@ -1833,6 +2399,7 @@ class Workbench(QMainWindow):
         self.update_metrics()
         self.validate_current_network()
         self.refresh_demand_ui()
+        self.refresh_signal_plans_ui()
 
         self.status_label.setText(f"Scenario '{self.scenario_path.name}' loaded successfully")
         return True
