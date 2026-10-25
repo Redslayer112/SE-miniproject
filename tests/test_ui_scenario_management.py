@@ -357,3 +357,36 @@ def test_open_scenario_dialog_cancelled_when_user_cancels_save(workbench, monkey
 
     workbench.open_scenario_dialog()
     assert len(file_dialog_opened) == 0  # File dialog was never reached
+
+
+def test_save_as_invoked_from_action_and_button_without_boolean_argument(workbench, tmp_path, monkeypatch):
+    """Verify Save As action and toolbar button discard Qt's boolean checked argument without TypeError."""
+    dest_action = tmp_path / "action_save_as.json"
+    dest_button = tmp_path / "button_save_as.json"
+    dest_direct = tmp_path / "direct_save_as.json"
+
+    current_dest = [dest_action]
+    call_args = []
+
+    def mock_get_save_file_name(*args, **kwargs):
+        call_args.append(args)
+        return str(current_dest[0]), "JSON Files (*.json)"
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", mock_get_save_file_name)
+
+    # 1. Trigger via menu action
+    workbench.save_as_action.trigger()
+    assert dest_action.exists()
+    assert workbench.scenario_path == dest_action
+
+    # 2. Trigger via toolbar button
+    current_dest[0] = dest_button
+    workbench.save_as_button.click()
+    assert dest_button.exists()
+    assert workbench.scenario_path == dest_button
+
+    # 3. Direct programmatic call with path still works
+    saved = workbench.save_scenario_as(dest_direct)
+    assert saved is True
+    assert dest_direct.exists()
+    assert workbench.scenario_path == dest_direct

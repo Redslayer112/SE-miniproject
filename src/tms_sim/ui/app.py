@@ -1037,7 +1037,7 @@ class Workbench(QMainWindow):
         self.save_as_action = file_menu.addAction("Save Scenario &As...")
         self.save_as_action.setShortcut("Ctrl+Shift+S")
         self.save_as_action.setStatusTip("Save current scenario to a new JSON file")
-        self.save_as_action.triggered.connect(self.save_scenario_as)
+        self.save_as_action.triggered.connect(lambda checked=False: self.save_scenario_as())
 
         file_menu.addSeparator()
         exit_action = file_menu.addAction("E&xit")
@@ -1102,7 +1102,7 @@ class Workbench(QMainWindow):
 
         self.save_as_button = QPushButton("Save As…")
         self.save_as_button.setToolTip("Save scenario as a new file (Ctrl+Shift+S)")
-        self.save_as_button.clicked.connect(self.save_scenario_as)
+        self.save_as_button.clicked.connect(lambda checked=False: self.save_scenario_as())
 
         header.addWidget(title)
         header.addSpacing(8)
@@ -2972,7 +2972,7 @@ class Workbench(QMainWindow):
 
     def save_scenario_as(self, path: str | Path | None = None) -> bool:
         """Prompt user for a destination path and save the scenario."""
-        if path is None:
+        if path is None or isinstance(path, bool):
             start_dir = str(self.scenario_path.parent) if self.scenario_path else ""
             default_name = self.scenario_path.name if self.scenario_path else "scenario.json"
             start_path = str(Path(start_dir) / default_name) if start_dir else default_name
