@@ -1,19 +1,19 @@
-﻿SRS Requirement,Requirement summary,SAD module / interface (provisional),STP test reference,Test coverage / note,Status
+SRS Requirement,Requirement summary,SAD module / interface (provisional),STP test reference,Test coverage / note,Status
 TMS-F-010,Create/edit directed road network; preserve attributes,Network Editor; Scenario Store,TC-NET-01,Save/reload all network attributes,Draft mapping
-TMS-F-011,Intersection control type and permitted turns,Network Editor / Network & Signal interface,TC-NET-02,STP §13 traceability row missing; permitted-turn behavior requires verification,Draft mapping
+TMS-F-011,Intersection control type and permitted turns,Network Editor / Network & Signal interface,TC-NET-02,STP §13 entry proposed; pending team review. Permitted-turn behavior requires verification.,Draft mapping
 TMS-F-012,Validate network and block invalid runs,Network Editor; validateNetwork(),TC-NET-03,"Disconnected graph, zero-length segment, zero-lane segment, missing receiving segment",Draft mapping
-TMS-F-013,Version-tagged JSON scenario import/export,Scenario Store; Workbench interface,TC-NET-04,STP §13 traceability row missing; verify schema-version validation and import/export behavior,Draft mapping
+TMS-F-013,Version-tagged JSON scenario import/export,Scenario Store; Workbench interface,TC-NET-04,STP §13 entry proposed; pending team review. Schema-version validation and import/export require verification.,Draft mapping
 TMS-F-020,Define fixed-time signal phases and timings,Signal Configuration,TC-SIG-01,Green/yellow/all-red timing values,Draft mapping
 TMS-F-022,Reject invalid/conflicting signal plans,Signal Configuration; validateSignalPlan(),TC-SIG-02,Conflict rules documented in Issue #1; verify against implementation,Draft mapping
 TMS-F-030,Configure arrival rates and turning ratios,Demand Generator,TC-DEM-01,Arrival-rate tolerance must be documented,Draft mapping
 TMS-F-032,Same scenario and seed yield identical results,Demand Generator; Simulation Engine,TC-DEM-02,Deterministic reproducibility,Draft mapping
 TMS-F-040,Fixed-step microscopic simulation,Simulation Engine,TC-SIM-01,Model parameters and remaining baseline-dependent rules require verification,Draft mapping
 TMS-F-041,Start/pause/step/reset/speed controls,Simulation Engine; Workbench controls,TC-SIM-02,Verify supported speed multipliers 0.5x 1x 2x and 4x,Draft mapping
-TMS-F-042,Stop at configured duration and finalize metrics,Simulation Engine; Metrics Service; Scenario Store,TC-SIM-03,"STP §13 traceability row missing; verify duration stop, finalization, and exactly-once behavior",Draft mapping
+TMS-F-042,Stop at configured duration and finalize metrics,Simulation Engine; Metrics Service; Scenario Store,TC-SIM-03,STP §13 entry proposed; pending team review. Automated duration/finalization test exists in tests/test_engine.py; full requirement acceptance still requires verification.,Draft mapping
 TMS-F-043,Render 2D vehicles signals and queues,2D Renderer,TC-SIM-04,Pan/zoom and engine/display consistency,Draft mapping
 TMS-F-050,Compute run metrics,Metrics Service,TC-MET-01,Independent recomputation,Draft mapping
-TMS-F-051,Display live metrics,Metrics Service; Results Dashboard,TC-MET-02,STP §13 traceability row missing; live dashboard implementation and behavior require verification,Draft mapping
-TMS-F-052,Persist completed run data,Scenario Store,TC-MET-03,STP §13 traceability row missing; completed-run persistence implementation and behavior require verification,Draft mapping
+TMS-F-051,Display live metrics,Metrics Service; Results Dashboard,TC-MET-02,STP §13 entry proposed; pending team review. Live metrics/dashboard implementation requires verification.,Draft mapping
+TMS-F-052,Persist completed run data,Scenario Store,TC-MET-03,STP §13 entry proposed; pending team review. Completed-run persistence implementation requires verification.,Draft mapping
 TMS-F-053,Compare completed runs,Metrics Service; Results Dashboard,TC-MET-04,Keep run identities distinct,Draft mapping
 TMS-F-054,Export run summary as CSV,Report Exporter,TC-MET-05,Validate headers and values,Draft mapping
 TMS-F-060,Save/list/load/rename/delete scenarios,Scenario Store,TC-LIB-01,Storage choice and operation coverage require verification,Draft mapping
