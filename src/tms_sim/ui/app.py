@@ -175,7 +175,7 @@ class RoadCanvas(QWidget):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TMS-Sim | Traffic Management System")
+        self.setWindowTitle("TMS-Sim")
         self.resize(1366, 768)
 
         self.scenario_path = (
