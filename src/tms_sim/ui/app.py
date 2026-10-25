@@ -36,6 +36,9 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QGridLayout,
     QProgressBar,
+    QTextEdit,
+    QPlainTextEdit,
+    QAbstractSpinBox,
 )
 
 from tms_sim.network import (
@@ -60,6 +63,7 @@ from tms_sim.sim.serialization import (
     save_scenario_document,
 )
 from tms_sim.ui.charts import LivePerformancePanel
+from tms_sim.ui.history import ScenarioHistoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +359,7 @@ class RoadCanvas(QWidget):
             "control_type": "uncontrolled",
         }
         intersections.append(new_intersection)
+        self._pending_edit_description = "Add Intersection"
         self.network_modified.emit()
         return new_id
 
@@ -398,6 +403,7 @@ class RoadCanvas(QWidget):
         }
         segments.append(new_segment)
         self.set_selection("segment", new_id)
+        self._pending_edit_description = "Add Road Segment"
         self.network_modified.emit()
         return True, f"Created road segment '{new_id}' ({start_id} → {dest_id})."
 
@@ -420,6 +426,7 @@ class RoadCanvas(QWidget):
             updated_plans = [p for p in plans if p.get("intersection_id") != iid]
             set_scenario_signal_plans(self.scenario_data, updated_plans)
             self.set_selection(None, None)
+            self._pending_edit_description = "Delete Intersection"
             self.network_modified.emit()
             return True, f"Deleted intersection '{iid}'."
 
@@ -448,6 +455,7 @@ class RoadCanvas(QWidget):
             set_scenario_signal_plans(self.scenario_data, raw_plans)
 
             self.set_selection(None, None)
+            self._pending_edit_description = "Delete Road Segment"
             self.network_modified.emit()
             return True, f"Deleted road segment '{sid}'."
 
@@ -863,6 +871,8 @@ class Workbench(QMainWindow):
         self.is_dirty: bool = False
         self.dirty: bool = False
         self.save_prompt_handler = None
+        self._is_restoring_history: bool = False
+        self._pending_edit_description: str = ""
 
         self.scenario_data = {}
         self.engine = None
@@ -914,6 +924,8 @@ class Workbench(QMainWindow):
         self.refresh_demand_ui()
         self.refresh_signal_plans_ui()
         self.set_dirty(False)
+        self.history_manager = ScenarioHistoryManager(self.scenario_data, max_history=50)
+        self.update_undo_redo_actions()
 
     def build_ui(self):
         self.setStyleSheet("""
@@ -1034,6 +1046,17 @@ class Workbench(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
+        self.undo_action = edit_menu.addAction("&Undo")
+        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self.undo_action.setStatusTip("Undo the last configuration change (Ctrl+Z)")
+        self.undo_action.triggered.connect(self.undo)
+
+        self.redo_action = edit_menu.addAction("&Redo")
+        self.redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        self.redo_action.setStatusTip("Redo the last undone configuration change (Ctrl+Y or Ctrl+Shift+Z)")
+        self.redo_action.triggered.connect(self.redo)
+
+        edit_menu.addSeparator()
         del_action = edit_menu.addAction("&Delete Selected")
         del_action.setShortcut(QKeySequence.StandardKey.Delete)
         del_action.setStatusTip("Delete selected intersection or road segment")
@@ -1057,6 +1080,14 @@ class Workbench(QMainWindow):
         subtitle = QLabel("TMS-Sim  /  Desktop Workbench")
         subtitle.setObjectName("muted")
 
+        self.btn_undo = QPushButton("↶ Undo")
+        self.btn_undo.setToolTip("Undo last change (Ctrl+Z)")
+        self.btn_undo.clicked.connect(self.undo)
+
+        self.btn_redo = QPushButton("↷ Redo")
+        self.btn_redo.setToolTip("Redo last undone change (Ctrl+Y)")
+        self.btn_redo.clicked.connect(self.redo)
+
         self.reset_view_button = QPushButton("⟲ Reset View")
         self.reset_view_button.setToolTip("Reset canvas zoom and pan (Ctrl+R or double-click canvas)")
         self.reset_view_button.clicked.connect(self.canvas.reset_view)
@@ -1077,6 +1108,8 @@ class Workbench(QMainWindow):
         header.addSpacing(8)
         header.addWidget(subtitle)
         header.addStretch()
+        header.addWidget(self.btn_undo)
+        header.addWidget(self.btn_redo)
         header.addWidget(self.reset_view_button)
         header.addWidget(self.open_button)
         header.addWidget(self.save_button)
@@ -1728,6 +1761,7 @@ class Workbench(QMainWindow):
         inter["position"] = [round(x_val, 1), round(y_val, 1)]
         inter["control_type"] = control_val
 
+        self._pending_edit_description = "Edit Intersection"
         self.on_network_modified()
         self.status_label.setText(f"Applied properties to intersection '{iid}'.")
 
@@ -1759,6 +1793,7 @@ class Workbench(QMainWindow):
         seg["lane_count"] = lane_count
         seg["speed_limit_mps"] = speed_val
 
+        self._pending_edit_description = "Edit Road Segment"
         self.on_network_modified()
         self.status_label.setText(f"Applied properties to road segment '{sid}'.")
 
@@ -1920,6 +1955,7 @@ class Workbench(QMainWindow):
             QMessageBox.warning(self, "Demand Validation Error", f"Cannot apply demand rate:\n{exc}")
             return False
 
+        self._pending_edit_description = "Configure Demand"
         self.on_network_modified()
         self.refresh_demand_ui()
         self.status_label.setText(f"Traffic demand configured: '{seg_id}' -> {rate_val:.1f} veh/h.")
@@ -1941,6 +1977,7 @@ class Workbench(QMainWindow):
         for mid in from_moves:
             t_ratios.pop(mid, None)
 
+        self._pending_edit_description = "Remove Demand"
         self.on_network_modified()
         self.refresh_demand_ui()
         self.status_label.setText(f"Removed traffic demand for road '{seg_id}'.")
@@ -2178,6 +2215,7 @@ class Workbench(QMainWindow):
             return
 
         set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self._pending_edit_description = "Create Signal Plan"
         self.on_network_modified()
         self.status_label.setText(f"Created signal plan for intersection '{iid}'.")
 
@@ -2233,6 +2271,7 @@ class Workbench(QMainWindow):
             return False
 
         set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self._pending_edit_description = "Edit Signal Phase"
         self.on_network_modified()
         warn_text = f" ({len(res.warnings)} warnings)" if res.warnings else ""
         self.status_label.setText(f"Applied phase {order_val} for '{iid}'{warn_text}.")
@@ -2298,6 +2337,7 @@ class Workbench(QMainWindow):
             return False
 
         set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self._pending_edit_description = "Add Signal Phase"
         self.on_network_modified()
         self.phase_table.selectRow(self.phase_table.rowCount() - 1)
         warn_text = f" ({len(res.warnings)} warnings)" if res.warnings else ""
@@ -2337,6 +2377,7 @@ class Workbench(QMainWindow):
             return False
 
         set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self._pending_edit_description = "Remove Signal Phase"
         self.on_network_modified()
         self.status_label.setText(f"Removed phase from '{iid}'.")
         return True
@@ -2375,6 +2416,7 @@ class Workbench(QMainWindow):
             return False
 
         set_scenario_signal_plans(self.scenario_data, raw_plans)
+        self._pending_edit_description = "Reorder Signal Phase"
         self.on_network_modified()
         self.phase_table.selectRow(target_row)
         self.status_label.setText(f"Reordered phases for '{iid}'.")
@@ -2437,9 +2479,23 @@ class Workbench(QMainWindow):
             if issue.element_type in ("intersection", "segment") and issue.element_id:
                 self.canvas.set_selection(issue.element_type, issue.element_id)
 
-    def on_network_modified(self):
+    def on_network_modified(self, description: str = ""):
         """Synchronize engine, metrics, canvas, demand, signal plans, and validation whenever network changes."""
         self.set_dirty(True)
+        if not getattr(self, "_is_restoring_history", False) and hasattr(self, "history_manager"):
+            desc = (
+                description
+                or getattr(self, "_pending_edit_description", "")
+                or getattr(self.canvas, "_pending_edit_description", "")
+                or "Edit Network"
+            )
+            self.history_manager.push(self.scenario_data, desc)
+            self._pending_edit_description = ""
+            if hasattr(self.canvas, "_pending_edit_description"):
+                self.canvas._pending_edit_description = ""
+            if hasattr(self, "update_undo_redo_actions"):
+                self.update_undo_redo_actions()
+
         self.timer.stop()
         self.update_metrics()
         self.canvas.reparse_signal_plans()
@@ -2793,6 +2849,10 @@ class Workbench(QMainWindow):
 
         self.status_label.setText(f"Scenario '{self.scenario_path.name}' loaded successfully")
         self.set_dirty(False)
+        if hasattr(self, "history_manager"):
+            self.history_manager.reset(self.scenario_data)
+        if hasattr(self, "update_undo_redo_actions"):
+            self.update_undo_redo_actions()
         return True
 
     def _handle_load_error(self, message: str, status_msg: str):
@@ -2946,6 +3006,125 @@ class Workbench(QMainWindow):
             event.accept()
         else:
             event.ignore()
+
+    @property
+    def can_undo(self) -> bool:
+        """True if there is an edit history state available to undo."""
+        return self.history_manager.can_undo if hasattr(self, "history_manager") else False
+
+    @property
+    def can_redo(self) -> bool:
+        """True if there is an undone edit state available to redo."""
+        return self.history_manager.can_redo if hasattr(self, "history_manager") else False
+
+    def update_undo_redo_actions(self):
+        """Update enabled states and tooltips for Undo and Redo actions and buttons."""
+        if not hasattr(self, "history_manager"):
+            return
+
+        can_undo = self.history_manager.can_undo
+        can_redo = self.history_manager.can_redo
+
+        undo_desc = self.history_manager.undo_description
+        redo_desc = self.history_manager.redo_description
+
+        if hasattr(self, "undo_action"):
+            self.undo_action.setEnabled(can_undo)
+            self.undo_action.setText(f"&Undo {undo_desc}" if undo_desc else "&Undo")
+
+        if hasattr(self, "redo_action"):
+            self.redo_action.setEnabled(can_redo)
+            self.redo_action.setText(f"&Redo {redo_desc}" if redo_desc else "&Redo")
+
+        if hasattr(self, "btn_undo"):
+            self.btn_undo.setEnabled(can_undo)
+            self.btn_undo.setToolTip(f"Undo {undo_desc} (Ctrl+Z)" if undo_desc else "Undo (Ctrl+Z)")
+
+        if hasattr(self, "btn_redo"):
+            self.btn_redo.setEnabled(can_redo)
+            self.btn_redo.setToolTip(f"Redo {redo_desc} (Ctrl+Y)" if redo_desc else "Redo (Ctrl+Y)")
+
+    def undo(self) -> bool:
+        """Undo the last configuration edit and safely rebuild the simulation."""
+        focused = QApplication.focusWidget() or (self.focusWidget() if hasattr(self, "focusWidget") else None)
+        if isinstance(focused, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QSpinBox)):
+            return False
+
+        if not hasattr(self, "history_manager") or not self.history_manager.can_undo:
+            return False
+
+        self.pause_simulation()
+        result = self.history_manager.undo()
+        if result is None:
+            return False
+
+        restored_scenario, action_desc = result
+        backup_scenario = copy.deepcopy(self.scenario_data)
+        self._is_restoring_history = True
+        try:
+            self.scenario_data = restored_scenario
+            self.canvas.scenario_data = self.scenario_data
+            self.on_network_modified()
+            self.set_dirty(True)
+            self.status_label.setText(f"Undid: {action_desc}" if action_desc else "Undid last edit")
+        except Exception as exc:
+            # Revert the history manager stack state
+            if self.history_manager.redo_stack:
+                self.history_manager.undo_stack.append(self.history_manager.redo_stack.pop())
+            self.scenario_data = backup_scenario
+            self.canvas.scenario_data = self.scenario_data
+            try:
+                self.on_network_modified()
+            except Exception:
+                pass
+            QMessageBox.critical(self, "Undo Failed", f"Failed to restore previous state:\n{exc}")
+            return False
+        finally:
+            self._is_restoring_history = False
+
+        self.update_undo_redo_actions()
+        return True
+
+    def redo(self) -> bool:
+        """Redo the last undone configuration edit and safely rebuild the simulation."""
+        focused = QApplication.focusWidget() or (self.focusWidget() if hasattr(self, "focusWidget") else None)
+        if isinstance(focused, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QSpinBox)):
+            return False
+
+        if not hasattr(self, "history_manager") or not self.history_manager.can_redo:
+            return False
+
+        self.pause_simulation()
+        result = self.history_manager.redo()
+        if result is None:
+            return False
+
+        restored_scenario, action_desc = result
+        backup_scenario = copy.deepcopy(self.scenario_data)
+        self._is_restoring_history = True
+        try:
+            self.scenario_data = restored_scenario
+            self.canvas.scenario_data = self.scenario_data
+            self.on_network_modified()
+            self.set_dirty(True)
+            self.status_label.setText(f"Redid: {action_desc}" if action_desc else "Redid last edit")
+        except Exception as exc:
+            # Revert history manager stack: pop from undo_stack and push back to redo_stack
+            if self.history_manager.undo_stack:
+                self.history_manager.redo_stack.append(self.history_manager.undo_stack.pop())
+            self.scenario_data = backup_scenario
+            self.canvas.scenario_data = self.scenario_data
+            try:
+                self.on_network_modified()
+            except Exception:
+                pass
+            QMessageBox.critical(self, "Redo Failed", f"Failed to restore state:\n{exc}")
+            return False
+        finally:
+            self._is_restoring_history = False
+
+        self.update_undo_redo_actions()
+        return True
 
 
 def main() -> int:
