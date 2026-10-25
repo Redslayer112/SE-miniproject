@@ -46,6 +46,7 @@ from tms_sim.network import (
     ValidationResult,
 )
 from tms_sim.network.serialization import network_from_dict
+from tms_sim.reporting.history import SimulationHistoryTracker
 from tms_sim.reporting.metrics import compute_metrics
 from tms_sim.signal import SignalPlan, SignalPhase, SignalPlanBlockedError
 from tms_sim.signal.validation import validate_signal_plan
@@ -53,6 +54,7 @@ from tms_sim.signal.serialization import plan_from_dict, plan_to_dict
 from tms_sim.sim.demand import DemandError, validate_demand
 from tms_sim.sim.scenario import build_engine, load_scenario
 from tms_sim.sim.serialization import ScenarioFormatError, load_scenario_document
+from tms_sim.ui.charts import LivePerformancePanel
 
 logger = logging.getLogger(__name__)
 
@@ -887,6 +889,9 @@ class Workbench(QMainWindow):
         self.speed_box.setCurrentText("1x")
 
         self.setFont(safe_font("Segoe UI", 10))
+        self.history_tracker = SimulationHistoryTracker(min_sample_interval=1.0)
+        if self.engine is not None:
+            self.history_tracker.record_state(self.engine)
         self.build_ui()
         self.update_metrics()
         self.validate_current_network()
@@ -1447,6 +1452,14 @@ class Workbench(QMainWindow):
         self.remaining_label = QLabel("0")
 
         right_layout.addWidget(results_panel)
+
+        # LIVE PERFORMANCE panel (Step 5B)
+        initial_duration = self.engine.duration if self.engine else 600.0
+        self.performance_panel = LivePerformancePanel(self.history_tracker, initial_duration, self)
+        self.timeline_widget = self.performance_panel.timeline_widget
+        self.counts_chart = self.performance_panel.counts_chart
+        self.travel_time_chart = self.performance_panel.travel_time_chart
+        right_layout.addWidget(self.performance_panel)
         right_layout.addStretch()
 
         right_scroll = QScrollArea()
@@ -1454,7 +1467,7 @@ class Workbench(QMainWindow):
         right_scroll.setFrameShape(QFrame.Shape.NoFrame)
         right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         right_scroll.setWidget(right)
-        right_scroll.setMinimumWidth(280)
+        right_scroll.setMinimumWidth(290)
         splitter.addWidget(right_scroll)
         splitter.setSizes([180, 760, 300])
         outer.addWidget(splitter, 1)
@@ -2365,6 +2378,10 @@ class Workbench(QMainWindow):
         else:
             self.status_label.setText(f"Network has {len(val_result.errors)} validation error(s). Simulation paused.")
 
+        if hasattr(self, "history_tracker"):
+            self.history_tracker.reset()
+            if self.engine is not None:
+                self.history_tracker.record_state(self.engine)
         self.update_metrics()
         self.canvas.update()
 
@@ -2387,6 +2404,8 @@ class Workbench(QMainWindow):
         if self.engine is not None:
             self.engine.pause()
             self.engine.step()
+            if hasattr(self, "history_tracker"):
+                self.history_tracker.record_state(self.engine, force=True)
             self.canvas.update()
             self.update_metrics()
             self.status_label.setText(
@@ -2398,6 +2417,10 @@ class Workbench(QMainWindow):
         self.timer.stop()
         if self.engine is not None:
             self.engine.reset()
+        if hasattr(self, "history_tracker"):
+            self.history_tracker.reset()
+            if self.engine is not None:
+                self.history_tracker.record_state(self.engine)
         self.canvas.update()
         self.update_metrics()
         self.status_label.setText("Simulation reset")
@@ -2438,9 +2461,28 @@ class Workbench(QMainWindow):
                 self.remaining_label.setText("0")
             if hasattr(self, "mean_travel_time_label"):
                 self.mean_travel_time_label.setText("N/A")
+            if hasattr(self, "history_tracker"):
+                self.history_tracker.reset()
+            if hasattr(self, "timeline_widget"):
+                self.timeline_widget.update_state(0.0, 600.0, "Ready")
+            if hasattr(self, "counts_chart"):
+                self.counts_chart.update()
+            if hasattr(self, "travel_time_chart"):
+                self.travel_time_chart.update()
             return
 
         m = compute_metrics(self.engine)
+
+        if hasattr(self, "history_tracker"):
+            self.history_tracker.record_state(self.engine, force=self.engine.finished)
+        if hasattr(self, "timeline_widget"):
+            self.timeline_widget.update_state(m.simulated_time, m.duration, m.status)
+        if hasattr(self, "counts_chart"):
+            self.counts_chart.set_duration(m.duration)
+            self.counts_chart.update()
+        if hasattr(self, "travel_time_chart"):
+            self.travel_time_chart.set_duration(m.duration)
+            self.travel_time_chart.update()
 
         if hasattr(self, "metric_status_label"):
             self._update_status_badge(m.status)
@@ -2541,6 +2583,9 @@ class Workbench(QMainWindow):
 
         self.change_speed(self.speed_box.currentText())
         self.canvas.set_scenario(self.engine, self.scenario_data)
+        if hasattr(self, "history_tracker"):
+            self.history_tracker.reset()
+            self.history_tracker.record_state(self.engine)
         self.update_metrics()
         self.validate_current_network()
         self.refresh_demand_ui()
