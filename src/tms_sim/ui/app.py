@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QScrollArea,
+    QGridLayout,
 )
 
 from tms_sim.network import (
@@ -45,6 +46,7 @@ from tms_sim.network import (
     ValidationResult,
 )
 from tms_sim.network.serialization import network_from_dict
+from tms_sim.reporting.metrics import compute_metrics
 from tms_sim.signal import SignalPlan, SignalPhase, SignalPlanBlockedError
 from tms_sim.signal.validation import validate_signal_plan
 from tms_sim.signal.serialization import plan_from_dict, plan_to_dict
@@ -1355,26 +1357,96 @@ class Workbench(QMainWindow):
         vl.addWidget(self.validation_list)
         right_layout.addWidget(val_frame)
 
-        # LIVE METRICS panel
-        metrics = self.panel("LIVE METRICS")
-        ml = metrics.layout()
+        # SIMULATION RESULTS dashboard panel
+        results_panel = self.panel("SIMULATION RESULTS")
+        rl = results_panel.layout()
+        rl.setSpacing(8)
+
+        # Status & Time banner
+        banner_frame = QFrame()
+        banner_frame.setStyleSheet(
+            "background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;"
+        )
+        banner_layout = QHBoxLayout(banner_frame)
+        banner_layout.setContentsMargins(8, 6, 8, 6)
+        banner_layout.setSpacing(6)
+
+        lbl_status_prefix = QLabel("Status:")
+        lbl_status_prefix.setStyleSheet("color: #64748b; font-size: 8.5pt; font-weight: 600;")
+        self.metric_status_label = QLabel("Ready")
+        self.metric_status_label.setStyleSheet(
+            "background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;"
+        )
+        banner_layout.addWidget(lbl_status_prefix)
+        banner_layout.addWidget(self.metric_status_label)
+        banner_layout.addStretch()
+
+        time_box = QHBoxLayout()
+        time_box.setSpacing(4)
         self.metric_time = QLabel("0.0 s")
-        self.metric_time.setObjectName("heading")
+        self.metric_time.setStyleSheet("font-size: 11pt; font-weight: 700; color: #0f172a;")
+        self.metric_duration_label = QLabel("/ 0.0 s")
+        self.metric_duration_label.setStyleSheet("font-size: 8.5pt; color: #94a3b8;")
+        time_box.addWidget(self.metric_time)
+        time_box.addWidget(self.metric_duration_label)
+        banner_layout.addLayout(time_box)
+        rl.addWidget(banner_frame)
+
+        # Compact metric cards grid (2 columns)
+        grid = QGridLayout()
+        grid.setSpacing(6)
+
+        # 1. Vehicles in Network (Active)
         self.vehicle_count_label = QLabel("0")
+        self.in_network_label = self.vehicle_count_label
+        grid.addWidget(self._create_metric_card("IN NETWORK", self.vehicle_count_label, "active cars"), 0, 0)
+
+        # 2. Vehicles Completed
         self.completed_label = QLabel("0")
+        grid.addWidget(self._create_metric_card("COMPLETED", self.completed_label, "trips finished"), 0, 1)
+
+        # 3. Vehicles Entered
+        self.entered_label = QLabel("0")
+        grid.addWidget(self._create_metric_card("ENTERED", self.entered_label, "entered network"), 1, 0)
+
+        # 4. Vehicles Generated
         self.generated_label = QLabel("0")
+        grid.addWidget(self._create_metric_card("GENERATED", self.generated_label, "scheduled demand"), 1, 1)
+
+        # 5. Mean Travel Time
+        self.mean_travel_time_label = QLabel("N/A")
+        grid.addWidget(self._create_metric_card("MEAN TRAVEL TIME", self.mean_travel_time_label, "completed trips"), 2, 0)
+
+        # 6. Throughput (Not available)
+        self.throughput_label = QLabel("Not available")
+        self.throughput_label.setStyleSheet("color: #94a3b8; font-size: 8.5pt; font-weight: 600;")
+        grid.addWidget(self._create_metric_card("THROUGHPUT", self.throughput_label, "not modeled"), 2, 1)
+
+        rl.addLayout(grid)
+
+        # Additional unmodeled metrics note
+        aux_frame = QFrame()
+        aux_frame.setStyleSheet(
+            "background: #fdfdfe; border: 1px dashed #cbd5e1; border-radius: 4px;"
+        )
+        aux_layout = QVBoxLayout(aux_frame)
+        aux_layout.setContentsMargins(6, 4, 6, 4)
+        aux_layout.setSpacing(2)
+
+        self.queue_metric_label = QLabel("Queue length: Not available")
+        self.queue_metric_label.setStyleSheet("color: #94a3b8; font-size: 8pt;")
+        self.queue_metric_label.setToolTip("Queue length tracking is not modeled in the current simulation engine.")
+        self.delay_metric_label = QLabel("Average delay: Not available")
+        self.delay_metric_label.setStyleSheet("color: #94a3b8; font-size: 8pt;")
+        self.delay_metric_label.setToolTip("Average delay calculation is not modeled in the current simulation engine.")
+        aux_layout.addWidget(self.queue_metric_label)
+        aux_layout.addWidget(self.delay_metric_label)
+        rl.addWidget(aux_frame)
+
+        # Backwards compatibility attributes
         self.remaining_label = QLabel("0")
-        ml.addWidget(QLabel("Simulation time"))
-        ml.addWidget(self.metric_time)
-        ml.addWidget(QLabel("Vehicles currently in network"))
-        ml.addWidget(self.vehicle_count_label)
-        ml.addWidget(QLabel("Vehicles completed"))
-        ml.addWidget(self.completed_label)
-        ml.addWidget(QLabel("Vehicles generated"))
-        ml.addWidget(self.generated_label)
-        ml.addWidget(QLabel("Vehicles waiting to enter"))
-        ml.addWidget(self.remaining_label)
-        right_layout.addWidget(metrics)
+
+        right_layout.addWidget(results_panel)
         right_layout.addStretch()
 
         right_scroll = QScrollArea()
@@ -1432,6 +1504,41 @@ class Workbench(QMainWindow):
         )
         layout.addWidget(label)
         return frame
+
+    @staticmethod
+    def _create_metric_card(title: str, value_label: QLabel, sub_text: str | None = None) -> QFrame:
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; }"
+            "QFrame:hover { border-color: #cbd5e1; background: #fafafa; }"
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 6, 8, 6)
+        card_layout.setSpacing(2)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            "color: #64748b; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.5px;"
+        )
+        if not value_label.styleSheet():
+            value_label.setStyleSheet("color: #0f172a; font-size: 13pt; font-weight: 700;")
+        card_layout.addWidget(title_lbl)
+        card_layout.addWidget(value_label)
+        if sub_text:
+            sub_lbl = QLabel(sub_text)
+            sub_lbl.setStyleSheet("color: #94a3b8; font-size: 7.5pt;")
+            card_layout.addWidget(sub_lbl)
+        return card
+
+    def _update_status_badge(self, status: str):
+        styles = {
+            "Ready": "background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
+            "Running": "background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
+            "Paused": "background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
+            "Completed": "background: #faf5ff; color: #6d28d9; border: 1px solid #e9d5ff; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
+        }
+        self.metric_status_label.setText(status)
+        self.metric_status_label.setStyleSheet(styles.get(status, styles["Ready"]))
 
     def set_tool_mode(self, mode: str):
         """Update active tool mode and set contextual guidance."""
@@ -2258,6 +2365,7 @@ class Workbench(QMainWindow):
         else:
             self.status_label.setText(f"Network has {len(val_result.errors)} validation error(s). Simulation paused.")
 
+        self.update_metrics()
         self.canvas.update()
 
     def start_simulation(self):
@@ -2267,11 +2375,13 @@ class Workbench(QMainWindow):
         self.engine.start()
         self.timer.start()
         self.status_label.setText("Simulation running")
+        self.update_metrics()
 
     def pause_simulation(self):
         if self.engine is not None:
             self.engine.pause()
         self.status_label.setText("Simulation paused")
+        self.update_metrics()
 
     def step_simulation(self):
         if self.engine is not None:
@@ -2304,19 +2414,54 @@ class Workbench(QMainWindow):
             if self.engine.finished:
                 self.timer.stop()
                 self.status_label.setText("Simulation completed")
+                self.update_metrics()
 
     def update_metrics(self):
         if self.engine is None:
+            if hasattr(self, "metric_status_label"):
+                self._update_status_badge("Ready")
+            if hasattr(self, "metric_time"):
+                self.metric_time.setText("0.0 s")
+            if hasattr(self, "metric_duration_label"):
+                self.metric_duration_label.setText("/ 0.0 s")
+            if hasattr(self, "clock_label"):
+                self.clock_label.setText("Simulation time: 0.0 s")
+            if hasattr(self, "vehicle_count_label"):
+                self.vehicle_count_label.setText("0")
+            if hasattr(self, "completed_label"):
+                self.completed_label.setText("0")
+            if hasattr(self, "generated_label"):
+                self.generated_label.setText("0")
+            if hasattr(self, "entered_label"):
+                self.entered_label.setText("0")
+            if hasattr(self, "remaining_label"):
+                self.remaining_label.setText("0")
+            if hasattr(self, "mean_travel_time_label"):
+                self.mean_travel_time_label.setText("N/A")
             return
-        value = self.engine.time
-        self.clock_label.setText(f"Simulation time: {value:.1f} s")
-        self.metric_time.setText(f"{value:.1f} s")
-        self.vehicle_count_label.setText(str(len(self.engine.cars)))
-        self.completed_label.setText(str(len(self.engine.exited)))
-        entered = sum(1 for event in self.engine.events if event[2] == "spawn")
-        self.generated_label.setText(str(entered))
-        waiting = max(0, len(self.engine.vehicles) - entered)
+
+        m = compute_metrics(self.engine)
+
+        if hasattr(self, "metric_status_label"):
+            self._update_status_badge(m.status)
+        self.clock_label.setText(f"Simulation time: {m.simulated_time:.1f} s")
+        self.metric_time.setText(f"{m.simulated_time:.1f} s")
+        if hasattr(self, "metric_duration_label"):
+            self.metric_duration_label.setText(f"/ {m.duration:.1f} s")
+
+        self.vehicle_count_label.setText(str(m.vehicles_in_network))
+        self.completed_label.setText(str(m.vehicles_completed))
+        self.generated_label.setText(str(m.vehicles_generated))
+        if hasattr(self, "entered_label"):
+            self.entered_label.setText(str(m.vehicles_entered))
+        waiting = max(0, m.vehicles_generated - m.vehicles_entered)
         self.remaining_label.setText(str(waiting))
+
+        if hasattr(self, "mean_travel_time_label"):
+            if m.mean_travel_time is not None:
+                self.mean_travel_time_label.setText(f"{m.mean_travel_time:.1f} s")
+            else:
+                self.mean_travel_time_label.setText("N/A")
 
         network = self.scenario_data.get("network", {})
         intersections = network.get("intersections", [])
