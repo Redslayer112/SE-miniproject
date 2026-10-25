@@ -54,7 +54,11 @@ from tms_sim.signal.validation import validate_signal_plan
 from tms_sim.signal.serialization import plan_from_dict, plan_to_dict
 from tms_sim.sim.demand import DemandError, validate_demand
 from tms_sim.sim.scenario import build_engine, load_scenario
-from tms_sim.sim.serialization import ScenarioFormatError, load_scenario_document
+from tms_sim.sim.serialization import (
+    ScenarioFormatError,
+    load_scenario_document,
+    save_scenario_document,
+)
 from tms_sim.ui.charts import LivePerformancePanel
 
 logger = logging.getLogger(__name__)
@@ -856,6 +860,10 @@ class Workbench(QMainWindow):
         )
         self.scenario_path = Path(scenario_path) if scenario_path else default_path
 
+        self.is_dirty: bool = False
+        self.dirty: bool = False
+        self.save_prompt_handler = None
+
         self.scenario_data = {}
         self.engine = None
         self.validation_issues: list[ValidationIssue] = []
@@ -905,6 +913,7 @@ class Workbench(QMainWindow):
         self.validate_current_network()
         self.refresh_demand_ui()
         self.refresh_signal_plans_ui()
+        self.set_dirty(False)
 
     def build_ui(self):
         self.setStyleSheet("""
@@ -1007,6 +1016,17 @@ class Workbench(QMainWindow):
         self.open_action.setShortcut("Ctrl+O")
         self.open_action.setStatusTip("Open and load a scenario JSON file")
         self.open_action.triggered.connect(self.open_scenario_dialog)
+
+        self.save_action = file_menu.addAction("&Save Scenario")
+        self.save_action.setShortcut("Ctrl+S")
+        self.save_action.setStatusTip("Save changes to the current scenario file")
+        self.save_action.triggered.connect(self.save_scenario)
+
+        self.save_as_action = file_menu.addAction("Save Scenario &As...")
+        self.save_as_action.setShortcut("Ctrl+Shift+S")
+        self.save_as_action.setStatusTip("Save current scenario to a new JSON file")
+        self.save_as_action.triggered.connect(self.save_scenario_as)
+
         file_menu.addSeparator()
         exit_action = file_menu.addAction("E&xit")
         exit_action.setShortcut("Ctrl+Q")
@@ -1045,12 +1065,22 @@ class Workbench(QMainWindow):
         self.open_button.setToolTip("Open a JSON scenario file (Ctrl+O)")
         self.open_button.clicked.connect(self.open_scenario_dialog)
 
+        self.save_button = QPushButton("💾 Save")
+        self.save_button.setToolTip("Save scenario to current file (Ctrl+S)")
+        self.save_button.clicked.connect(self.save_scenario)
+
+        self.save_as_button = QPushButton("Save As…")
+        self.save_as_button.setToolTip("Save scenario as a new file (Ctrl+Shift+S)")
+        self.save_as_button.clicked.connect(self.save_scenario_as)
+
         header.addWidget(title)
         header.addSpacing(8)
         header.addWidget(subtitle)
         header.addStretch()
         header.addWidget(self.reset_view_button)
         header.addWidget(self.open_button)
+        header.addWidget(self.save_button)
+        header.addWidget(self.save_as_button)
         outer.addLayout(header)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2409,6 +2439,7 @@ class Workbench(QMainWindow):
 
     def on_network_modified(self):
         """Synchronize engine, metrics, canvas, demand, signal plans, and validation whenever network changes."""
+        self.set_dirty(True)
         self.timer.stop()
         self.update_metrics()
         self.canvas.reparse_signal_plans()
@@ -2688,6 +2719,9 @@ class Workbench(QMainWindow):
 
     def open_scenario_dialog(self):
         """Prompt user with file dialog to open and load a scenario JSON file."""
+        if not self.maybe_save_changes():
+            return
+
         start_dir = str(self.scenario_path.parent) if self.scenario_path else ""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -2758,11 +2792,160 @@ class Workbench(QMainWindow):
         self.refresh_signal_plans_ui()
 
         self.status_label.setText(f"Scenario '{self.scenario_path.name}' loaded successfully")
+        self.set_dirty(False)
         return True
 
     def _handle_load_error(self, message: str, status_msg: str):
         self.status_label.setText(f"Failed to load scenario: {status_msg}")
         QMessageBox.critical(self, "Unable to Load Scenario", message)
+
+    def set_dirty(self, dirty: bool = True):
+        """Set or clear dirty state and update window title."""
+        self.is_dirty = bool(dirty)
+        self.dirty = self.is_dirty
+        if self.is_dirty:
+            self.setWindowTitle("TMS-Sim *")
+        else:
+            self.setWindowTitle("TMS-Sim")
+
+    def prompt_save_changes_dialog(self) -> str:
+        """Prompt user with Save, Discard, Cancel dialog. Returns 'save', 'discard', or 'cancel'."""
+        if hasattr(self, "save_prompt_handler") and callable(self.save_prompt_handler):
+            return self.save_prompt_handler()
+
+        app = QApplication.instance()
+        if app is not None and app.platformName() == "offscreen":
+            return "discard"
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Unsaved Changes")
+        box.setText("The current scenario has unsaved changes.\nDo you want to save them before continuing?")
+        btn_save = box.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+        btn_discard = box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_save)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == btn_save:
+            return "save"
+        elif clicked == btn_discard:
+            return "discard"
+        else:
+            return "cancel"
+
+    def maybe_save_changes(self) -> bool:
+        """Check for unsaved changes before a destructive action.
+
+        Returns:
+            True if it is safe to proceed (not dirty, discarded, or saved successfully).
+            False if the action should be aborted (cancelled or save failed).
+        """
+        if not self.is_dirty:
+            return True
+
+        decision = self.prompt_save_changes_dialog()
+        if decision == "save":
+            return self.save_scenario()
+        elif decision == "discard":
+            return True
+        else:  # cancel
+            return False
+
+    def confirm_overwrite(self, path: Path) -> bool:
+        """Prompt confirmation before overwriting an existing file."""
+        app = QApplication.instance()
+        if app is not None and app.platformName() == "offscreen":
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Confirm Overwrite",
+            f"The file '{path.name}' already exists.\nDo you want to replace it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _write_scenario_to_path(self, target_path: str | Path) -> bool:
+        """Helper to validate and write scenario data to target path."""
+        target = Path(target_path)
+        try:
+            save_scenario_document(self.scenario_data, target)
+        except ScenarioFormatError as exc:
+            logger.warning("Scenario serialization error saving to %s: %s", target, exc)
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Cannot save scenario: the configuration is invalid.\n\n{exc}",
+            )
+            return False
+        except OSError as exc:
+            logger.warning("File error saving scenario to %s: %s", target, exc)
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Cannot write scenario file to:\n{target}\n\n{exc}",
+            )
+            return False
+        except Exception as exc:
+            logger.exception("Unexpected error saving scenario to %s: %s", target, exc)
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"An unexpected error occurred while saving:\n\n{exc}",
+            )
+            return False
+
+        self.scenario_path = target
+        self.set_dirty(False)
+        self.scenario_file_label.setText(target.name)
+        self.scenario_file_label.setToolTip(str(target))
+        self.status_label.setText(f"Scenario saved successfully to '{target.name}'")
+        return True
+
+    def save_scenario(self) -> bool:
+        """Save scenario to current path, or prompt Save As if path is unset."""
+        if self.scenario_path is not None:
+            return self._write_scenario_to_path(self.scenario_path)
+        return self.save_scenario_as()
+
+    def save_scenario_as(self, path: str | Path | None = None) -> bool:
+        """Prompt user for a destination path and save the scenario."""
+        if path is None:
+            start_dir = str(self.scenario_path.parent) if self.scenario_path else ""
+            default_name = self.scenario_path.name if self.scenario_path else "scenario.json"
+            start_path = str(Path(start_dir) / default_name) if start_dir else default_name
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Scenario As",
+                start_path,
+                "JSON Files (*.json);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.status_label.setText("Save cancelled")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() != ".json":
+            dest = dest.with_suffix(".json")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.status_label.setText("Save cancelled: existing file not overwritten")
+            return False
+
+        return self._write_scenario_to_path(dest)
+
+    def closeEvent(self, event):
+        """Handle application close event, prompting to save unsaved changes."""
+        if self.maybe_save_changes():
+            self.timer.stop()
+            event.accept()
+        else:
+            event.ignore()
 
 
 def main() -> int:
