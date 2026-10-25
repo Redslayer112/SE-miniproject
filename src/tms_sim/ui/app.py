@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QPointF, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QKeySequence
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QScrollArea,
     QGridLayout,
+    QProgressBar,
 )
 
 from tms_sim.network import (
@@ -888,6 +889,13 @@ class Workbench(QMainWindow):
         self.speed_box.addItems(["0.5x", "1x", "2x", "4x"])
         self.speed_box.setCurrentText("1x")
 
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1000)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("0.0% (0.0 / 0.0 s)")
+        self.progress_bar.setToolTip("Simulation progress (synchronized with engine clock)")
+        self.playback_progress_bar = self.progress_bar
+
         self.setFont(safe_font("Segoe UI", 10))
         self.history_tracker = SimulationHistoryTracker(min_sample_interval=1.0)
         if self.engine is not None:
@@ -931,6 +939,27 @@ class Workbench(QMainWindow):
                 font-weight: 600;
             }
             QPushButton#primary:hover { background: #1d4ed8; }
+            QPushButton:disabled {
+                background: #f8fafc;
+                color: #94a3b8;
+                border-color: #e2e8f0;
+            }
+            QProgressBar {
+                border: 1px solid #d0d5dd;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #f1f5f9;
+                color: #1e293b;
+                font-size: 8.5pt;
+                font-weight: 600;
+                min-height: 22px;
+                max-height: 24px;
+                min-width: 150px;
+            }
+            QProgressBar::chunk {
+                background-color: #2563eb;
+                border-radius: 3px;
+            }
             QPushButton#danger {
                 background: #fee2e2;
                 color: #dc2626;
@@ -1474,30 +1503,62 @@ class Workbench(QMainWindow):
 
         # Simulation controls
         controls = self.panel("SIMULATION CONTROLS")
+        self.controls_panel = controls
+        self.playback_toolbar = controls
         control_layout = QHBoxLayout()
+        control_layout.setContentsMargins(8, 4, 8, 4)
+        control_layout.setSpacing(8)
         controls.layout().addLayout(control_layout)
 
-        start = QPushButton("▶  Start")
-        start.setObjectName("primary")
-        pause = QPushButton("Ⅱ  Pause")
-        step = QPushButton("Step")
-        reset = QPushButton("Reset")
+        self.btn_play = QPushButton("▶  Play")
+        self.btn_play.setObjectName("primary")
+        self.btn_play.setToolTip("Start or resume simulation (Space)")
+        self.btn_start = self.btn_play  # Backwards compatibility alias
 
-        start.clicked.connect(self.start_simulation)
-        pause.clicked.connect(self.pause_simulation)
-        step.clicked.connect(self.step_simulation)
-        reset.clicked.connect(self.reset_simulation)
+        self.btn_pause = QPushButton("⏸  Pause")
+        self.btn_pause.setToolTip("Pause automatic simulation advancement (Space)")
+
+        self.btn_step = QPushButton("⏭  Step")
+        self.btn_step.setToolTip("Advance simulation by one time-step (S)")
+
+        self.btn_reset = QPushButton("↺  Reset")
+        self.btn_reset.setToolTip("Reset simulation to initial state (R)")
+
+        self.btn_play.clicked.connect(self.start_simulation)
+        self.btn_pause.clicked.connect(self.pause_simulation)
+        self.btn_step.clicked.connect(self.step_simulation)
+        self.btn_reset.clicked.connect(self.reset_simulation)
         self.speed_box.currentTextChanged.connect(self.change_speed)
 
-        for widget in (start, pause, step, reset):
-            control_layout.addWidget(widget)
+        for btn in (self.btn_play, self.btn_pause, self.btn_step, self.btn_reset):
+            control_layout.addWidget(btn)
 
-        control_layout.addSpacing(16)
-        control_layout.addWidget(QLabel("Speed"))
+        control_layout.addSpacing(10)
+        lbl_speed = QLabel("Speed:")
+        lbl_speed.setStyleSheet("color: #475467; font-weight: 600;")
+        control_layout.addWidget(lbl_speed)
         control_layout.addWidget(self.speed_box)
-        control_layout.addStretch()
+
+        control_layout.addSpacing(10)
+        lbl_prog = QLabel("Progress:")
+        lbl_prog.setStyleSheet("color: #475467; font-weight: 600;")
+        control_layout.addWidget(lbl_prog)
+        control_layout.addWidget(self.progress_bar, 1)
+
+        control_layout.addSpacing(10)
+        self.clock_label.setStyleSheet("font-weight: 600; color: #0f172a;")
         control_layout.addWidget(self.clock_label)
         outer.addWidget(controls)
+
+        # Keyboard shortcuts
+        self.shortcut_space = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        self.shortcut_space.activated.connect(self._shortcut_toggle_play_pause)
+
+        self.shortcut_step = QShortcut(QKeySequence(Qt.Key.Key_S), self)
+        self.shortcut_step.activated.connect(self._shortcut_step)
+
+        self.shortcut_reset = QShortcut(QKeySequence(Qt.Key.Key_R), self)
+        self.shortcut_reset.activated.connect(self._shortcut_reset)
 
         outer.addWidget(self.status_label)
         self.setCentralWidget(root)
@@ -2370,12 +2431,20 @@ class Workbench(QMainWindow):
                 self.change_speed(self.speed_box.currentText())
                 self.status_label.setText("Network updated. Simulation ready.")
             except DemandError as exc:
+                self.engine = None
+                self.canvas.engine = None
                 self.status_label.setText(f"Simulation engine paused: demand configuration error ({exc})")
             except SignalPlanBlockedError as exc:
+                self.engine = None
+                self.canvas.engine = None
                 self.status_label.setText(f"Simulation engine paused: signal plan error ({exc})")
             except Exception as exc:
+                self.engine = None
+                self.canvas.engine = None
                 self.status_label.setText(f"Simulation engine paused: {exc}")
         else:
+            self.engine = None
+            self.canvas.engine = None
             self.status_label.setText(f"Network has {len(val_result.errors)} validation error(s). Simulation paused.")
 
         if hasattr(self, "history_tracker"):
@@ -2388,6 +2457,9 @@ class Workbench(QMainWindow):
     def start_simulation(self):
         if self.engine is None or self.engine.finished:
             self.status_label.setText("Simulation finished or not ready — press Reset to run again")
+            self.update_playback_controls_state()
+            return
+        if self.timer.isActive():
             return
         self.engine.start()
         self.timer.start()
@@ -2395,28 +2467,36 @@ class Workbench(QMainWindow):
         self.update_metrics()
 
     def pause_simulation(self):
+        if self.timer.isActive():
+            self.timer.stop()
         if self.engine is not None:
             self.engine.pause()
         self.status_label.setText("Simulation paused")
         self.update_metrics()
 
     def step_simulation(self):
-        if self.engine is not None:
-            self.engine.pause()
-            self.engine.step()
-            if hasattr(self, "history_tracker"):
-                self.history_tracker.record_state(self.engine, force=True)
-            self.canvas.update()
-            self.update_metrics()
-            self.status_label.setText(
-                "Simulation completed" if self.engine.finished
-                else "Advanced one simulation step"
-            )
+        if self.engine is None or self.engine.finished:
+            return
+        if self.timer.isActive():
+            self.timer.stop()
+        self.engine.pause()
+        self.engine.step()
+        if hasattr(self, "history_tracker"):
+            self.history_tracker.record_state(self.engine, force=True)
+        self.canvas.update()
+        self.update_metrics()
+        self.status_label.setText(
+            "Simulation completed" if self.engine.finished
+            else "Advanced one simulation step"
+        )
 
     def reset_simulation(self):
-        self.timer.stop()
+        if self.timer.isActive():
+            self.timer.stop()
         if self.engine is not None:
             self.engine.reset()
+            if hasattr(self, "speed_box"):
+                self.change_speed(self.speed_box.currentText())
         if hasattr(self, "history_tracker"):
             self.history_tracker.reset()
             if self.engine is not None:
@@ -2427,17 +2507,101 @@ class Workbench(QMainWindow):
 
     def change_speed(self, value):
         if self.engine is not None:
-            self.engine.set_speed(float(value.replace("x", "")))
+            clean_str = str(value).replace("×", "").replace("x", "").strip()
+            try:
+                multiplier = float(clean_str)
+                self.engine.set_speed(multiplier)
+            except (ValueError, TypeError) as exc:
+                logger.warning("Invalid speed value: %s (%s)", value, exc)
 
     def advance_simulation(self):
-        if self.engine is not None:
+        if self.engine is not None and getattr(self.engine, "running", False):
             self.engine.advance(self.timer.interval() / 1000.0)
             self.canvas.update()
             self.update_metrics()
             if self.engine.finished:
-                self.timer.stop()
+                if self.timer.isActive():
+                    self.timer.stop()
                 self.status_label.setText("Simulation completed")
                 self.update_metrics()
+
+    def _shortcut_toggle_play_pause(self):
+        focused = QApplication.focusWidget() or (self.focusWidget() if hasattr(self, "focusWidget") else None)
+        if isinstance(focused, (QLineEdit, QSpinBox)):
+            return
+        if self.engine is not None and getattr(self.engine, "running", False):
+            self.pause_simulation()
+        elif hasattr(self, "btn_play") and self.btn_play.isEnabled():
+            self.start_simulation()
+
+    def _shortcut_step(self):
+        focused = QApplication.focusWidget() or (self.focusWidget() if hasattr(self, "focusWidget") else None)
+        if isinstance(focused, (QLineEdit, QSpinBox)):
+            return
+        if hasattr(self, "btn_step") and self.btn_step.isEnabled():
+            self.step_simulation()
+
+    def _shortcut_reset(self):
+        focused = QApplication.focusWidget() or (self.focusWidget() if hasattr(self, "focusWidget") else None)
+        if isinstance(focused, (QLineEdit, QSpinBox)):
+            return
+        if hasattr(self, "btn_reset") and self.btn_reset.isEnabled():
+            self.reset_simulation()
+
+    def update_playback_controls_state(self):
+        """Synchronize playback button states, progress bar, and labels with current simulation state."""
+        if not hasattr(self, "btn_play"):
+            return
+
+        if self.engine is None:
+            self.btn_play.setEnabled(False)
+            self.btn_play.setText("▶  Play")
+            self.btn_pause.setEnabled(False)
+            self.btn_step.setEnabled(False)
+            self.btn_reset.setEnabled(False)
+            if hasattr(self, "progress_bar"):
+                self.progress_bar.setValue(0)
+                self.progress_bar.setFormat("0.0% (0.0 / 0.0 s)")
+            return
+
+        t = self.engine.time
+        dur = self.engine.duration if self.engine.duration > 0 else 600.0
+        finished = self.engine.finished
+        running = getattr(self.engine, "running", False) and not finished
+
+        if finished:
+            self.btn_play.setEnabled(False)
+            self.btn_play.setText("▶  Play")
+            self.btn_pause.setEnabled(False)
+            self.btn_step.setEnabled(False)
+            self.btn_reset.setEnabled(True)
+            pct = 100.0
+        elif running:
+            self.btn_play.setEnabled(False)
+            self.btn_play.setText("▶  Play")
+            self.btn_pause.setEnabled(True)
+            self.btn_step.setEnabled(False)
+            self.btn_reset.setEnabled(True)
+            pct = min(100.0, (t / dur) * 100.0) if dur > 0 else 0.0
+        elif t > 0:
+            self.btn_play.setEnabled(True)
+            self.btn_play.setText("▶  Resume")
+            self.btn_pause.setEnabled(False)
+            self.btn_step.setEnabled(True)
+            self.btn_reset.setEnabled(True)
+            pct = min(100.0, (t / dur) * 100.0) if dur > 0 else 0.0
+        else:
+            self.btn_play.setEnabled(True)
+            self.btn_play.setText("▶  Play")
+            self.btn_pause.setEnabled(False)
+            self.btn_step.setEnabled(True)
+            self.btn_reset.setEnabled(False)
+            pct = 0.0
+
+        if hasattr(self, "progress_bar"):
+            bar_val = int(round(pct * 10))
+            self.progress_bar.setValue(max(0, min(1000, bar_val)))
+            self.progress_bar.setFormat(f"{pct:.1f}% ({t:.1f} / {dur:.1f} s)")
 
     def update_metrics(self):
         if self.engine is None:
@@ -2469,6 +2633,7 @@ class Workbench(QMainWindow):
                 self.counts_chart.update()
             if hasattr(self, "travel_time_chart"):
                 self.travel_time_chart.update()
+            self.update_playback_controls_state()
             return
 
         m = compute_metrics(self.engine)
@@ -2519,6 +2684,7 @@ class Workbench(QMainWindow):
             self.scenario_file_label.setText(self.scenario_path.name)
             self.scenario_file_label.setToolTip(str(self.scenario_path))
         self.scenario_name_label.setText(self.scenario_data.get("name", "Scenario"))
+        self.update_playback_controls_state()
 
     def open_scenario_dialog(self):
         """Prompt user with file dialog to open and load a scenario JSON file."""
