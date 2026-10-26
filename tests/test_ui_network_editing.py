@@ -462,4 +462,3 @@ def test_mouse_move_event_hover_and_drag_behavior(workbench):
     workbench.set_tool_mode("add_intersection")
     canvas.mouseMoveEvent(ev2)
     assert canvas.cursor().shape() == Qt.CursorShape.CrossCursor
-
