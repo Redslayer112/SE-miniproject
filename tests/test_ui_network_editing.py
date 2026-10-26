@@ -462,3 +462,93 @@ def test_mouse_move_event_hover_and_drag_behavior(workbench):
     workbench.set_tool_mode("add_intersection")
     canvas.mouseMoveEvent(ev2)
     assert canvas.cursor().shape() == Qt.CursorShape.CrossCursor
+
+
+def test_permitted_turns_inspector_add_and_remove(workbench):
+    """Verify permitted turns (turning movements) can be defined and removed through the UI."""
+    # 1. Select intersection I1 which already has TM1 (R2 -> R1)
+    workbench.canvas.set_selection("intersection", "I1")
+    assert workbench.table_inter_turns.rowCount() == 1
+    assert workbench.table_inter_turns.item(0, 0).text() == "TM1"
+    assert workbench.table_inter_turns.item(0, 1).text() == "R2"
+    assert workbench.table_inter_turns.item(0, 2).text() == "R1"
+
+    # 2. Select intersection I2 which currently has no turning movements
+    workbench.canvas.set_selection("intersection", "I2")
+    assert workbench.table_inter_turns.rowCount() == 0
+    # Incoming segment ending at I2 is R1, outgoing starting at I2 is R2
+    assert workbench.combo_turn_from.currentText() == "R1"
+    assert workbench.combo_turn_to.currentText() == "R2"
+    assert workbench.btn_add_turn.isEnabled() is True
+
+    # 3. Add permitted turn at I2
+    success = workbench.add_permitted_turn()
+    assert success is True
+    assert workbench.table_inter_turns.rowCount() == 1
+    new_tm_id = workbench.table_inter_turns.item(0, 0).text()
+
+    net_tms = workbench.scenario_data["network"]["turning_movements"]
+    matching = [m for m in net_tms if m["id"] == new_tm_id]
+    assert len(matching) == 1
+    assert matching[0]["intersection"] == "I2"
+    assert matching[0]["from_segment"] == "R1"
+    assert matching[0]["to_segment"] == "R2"
+
+    # Verify network remains valid
+    val_res = validate(network_from_dict({"network": workbench.scenario_data["network"]}))
+    assert val_res.is_valid is True
+
+    # 4. Remove permitted turn
+    workbench.table_inter_turns.selectRow(0)
+    remove_success = workbench.remove_permitted_turn()
+    assert remove_success is True
+    assert workbench.table_inter_turns.rowCount() == 0
+    assert not any(m["id"] == new_tm_id for m in workbench.scenario_data["network"]["turning_movements"])
+
+
+def test_validation_item_click_highlights_turning_movement_parent_intersection(workbench):
+    """Verify clicking an invalid turning movement validation error selects its parent intersection."""
+    # Introduce invalid turning movement referencing an unknown segment
+    workbench.scenario_data["network"]["turning_movements"].append({
+        "id": "TM_BAD",
+        "intersection": "I1",
+        "from_segment": "NON_EXISTENT_SEG",
+        "to_segment": "R1"
+    })
+    workbench.validate_current_network()
+
+    # Find the error item in validation_list
+    assert workbench.validation_list.count() > 0
+    bad_tm_item = None
+    for idx in range(workbench.validation_list.count()):
+        it = workbench.validation_list.item(idx)
+        if "TM_BAD" in it.text():
+            bad_tm_item = it
+            break
+
+    assert bad_tm_item is not None
+    # Click the item
+    workbench.on_validation_item_clicked(bad_tm_item)
+
+    # Intersection I1 must be selected on canvas
+    assert workbench.canvas.selected_type == "intersection"
+    assert workbench.canvas.selected_id == "I1"
+
+
+def test_workbench_usable_at_minimum_resolution_1366x768(workbench, qapp):
+    """Verify workbench layout remains fully functional and unclipped at minimum target resolution 1366x768."""
+    workbench.resize(1366, 768)
+    workbench.show()
+    qapp.processEvents()
+
+    # Verify central canvas and side panels remain visible and properly proportioned
+    assert workbench.canvas.isVisible()
+    assert workbench.canvas.width() >= 500
+    assert workbench.canvas.height() >= 350
+
+    # Ensure critical controls and panels are intact and accessible
+    assert workbench.btn_play.isVisible()
+    assert workbench.btn_step.isVisible()
+    assert workbench.btn_reset.isVisible()
+    assert workbench.inspector_stack.isVisible()
+    assert workbench.validation_status_label.isVisible()

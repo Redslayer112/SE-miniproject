@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
@@ -151,10 +152,14 @@ class RoadCanvas(QWidget):
     COLOR_RED = QColor("#ef4444")
     COLOR_UNSIGNALIZED = QColor("#94a3b8")
     COLOR_SELECTION = QColor("#2563eb")
+    COLOR_QUEUE = QColor("#d97706")
 
     MIN_ZOOM = 0.2
     MAX_ZOOM = 5.0
     DEFAULT_ZOOM = 1.0
+
+    # Speed threshold (m/s) below which a vehicle is considered queued / waiting
+    QUEUE_SPEED_THRESHOLD: float = 1.0
 
     # Signals to communicate user actions with Workbench
     selection_changed = Signal(str, str)  # (element_type, element_id) or ("", "")
@@ -169,6 +174,14 @@ class RoadCanvas(QWidget):
         self.signal_plans: dict[str, SignalPlan] = {}
         self.zoom_level: float = self.DEFAULT_ZOOM
         self.pan_offset: QPointF = QPointF(0.0, 0.0)
+
+        # TC-PERF-01 Performance Instrumentation
+        self._perf_instrumentation_enabled: bool = True
+        self._frame_times: list[float] = []
+        self._frame_timestamps: list[float] = []
+        self._last_frame_render_time_ms: float = 0.0
+        self._fps_estimate: float = 0.0
+        self._total_frame_count: int = 0
 
         # Tools & Selection state
         self.active_tool: str = "select"
@@ -236,6 +249,42 @@ class RoadCanvas(QWidget):
             self.selected_id = element_id
             self.selection_changed.emit(element_type or "", element_id or "")
             self.update()
+
+    def get_queue_state(self, segment_id: str) -> dict:
+        """Return authoritative queue state (count, length in meters, vehicle ids) for a segment."""
+        if self.engine is None or not getattr(self.engine, "cars", None):
+            return {"count": 0, "length_m": 0.0, "vehicle_ids": []}
+        network = self.scenario_data.get("network", {})
+        segments = network.get("segments", [])
+        seg = next((s for s in segments if s.get("id") == segment_id), None)
+        if not seg:
+            return {"count": 0, "length_m": 0.0, "vehicle_ids": []}
+        seg_len = float(seg.get("length_m", 1.0))
+        queued = [
+            c for c in self.engine.cars
+            if c.route and c.leg < len(c.route) and c.route[c.leg] == segment_id and c.v < self.QUEUE_SPEED_THRESHOLD
+        ]
+        if not queued:
+            return {"count": 0, "length_m": 0.0, "vehicle_ids": []}
+        tail_x = min(c.x for c in queued)
+        veh_len = getattr(getattr(self.engine, "p", None), "length", 5.0)
+        q_len = max(0.0, seg_len - tail_x + veh_len)
+        return {
+            "count": len(queued),
+            "length_m": round(q_len, 1),
+            "vehicle_ids": [c.id for c in queued],
+        }
+
+    def get_rendering_performance_metrics(self) -> dict:
+        """Return frame render timing and FPS metrics for TC-PERF-01 compliance."""
+        avg_ms = (sum(self._frame_times) / len(self._frame_times)) if self._frame_times else 0.0
+        return {
+            "last_frame_ms": round(self._last_frame_render_time_ms, 2),
+            "avg_frame_ms": round(avg_ms, 2),
+            "rolling_avg_ms": round(avg_ms, 2),
+            "fps": round(self._fps_estimate, 1),
+            "total_frames": self._total_frame_count,
+        }
 
     def get_coordinate_bounds(self):
         """Compute the bounding box of intersection coordinates in scenario space."""
@@ -627,6 +676,7 @@ class RoadCanvas(QWidget):
         super().keyPressEvent(event)
 
     def paintEvent(self, event):
+        t_start = time.perf_counter()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), self.BACKGROUND)
@@ -654,7 +704,7 @@ class RoadCanvas(QWidget):
 
         sim_time = self.engine.time if self.engine is not None else 0.0
 
-        # 1. Draw road segments
+        # 1. Draw directed road segments
         for segment in segments:
             start = screen_positions.get(segment.get("from"))
             end = screen_positions.get(segment.get("to"))
@@ -679,6 +729,26 @@ class RoadCanvas(QWidget):
             painter.setPen(QPen(QColor("#f8fafc"), 2, Qt.PenStyle.DashLine))
             painter.drawLine(start, end)
 
+            # Directional flow indicator chevrons along the segment (start -> end)
+            seg_dx = end.x() - start.x()
+            seg_dy = end.y() - start.y()
+            seg_dist = math.hypot(seg_dx, seg_dy)
+            if seg_dist >= 28.0:
+                seg_ux = seg_dx / seg_dist
+                seg_uy = seg_dy / seg_dist
+                seg_px = -seg_uy
+                seg_py = seg_ux
+                arrow_fractions = [0.5] if seg_dist < 90.0 else [0.35, 0.65]
+                painter.setPen(QPen(QColor(255, 255, 255, 210), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                for frac in arrow_fractions:
+                    acx = start.x() + seg_dx * frac
+                    acy = start.y() + seg_dy * frac
+                    tip = QPointF(acx + seg_ux * 5.0, acy + seg_uy * 5.0)
+                    left = QPointF(acx - seg_ux * 4.0 + seg_px * 4.0, acy - seg_uy * 4.0 + seg_py * 4.0)
+                    right = QPointF(acx - seg_ux * 4.0 - seg_px * 4.0, acy - seg_uy * 4.0 - seg_py * 4.0)
+                    painter.drawLine(left, tip)
+                    painter.drawLine(right, tip)
+
             # Road name label
             if self.zoom_level >= 0.4:
                 midpoint = QPointF((start.x() + end.x()) / 2.0,
@@ -698,12 +768,9 @@ class RoadCanvas(QWidget):
                 painter.setBrush(QColor(37, 99, 235, 120))
                 painter.drawEllipse(self.road_hover_pos, 6, 6)
 
-        # 3. Draw approach stop lines and signal indicators
+        # 3. Draw approach stop lines, signal indicators, and queue states
         for segment in segments:
             to_node = segment.get("to")
-            plan = self.signal_plans.get(to_node)
-            if not plan:
-                continue
             start = screen_positions.get(segment.get("from"))
             end = screen_positions.get(segment.get("to"))
             if start is None or end is None:
@@ -711,7 +778,7 @@ class RoadCanvas(QWidget):
 
             dx = start.x() - end.x()
             dy = start.y() - end.y()
-            dist = (dx * dx + dy * dy) ** 0.5
+            dist = math.hypot(dx, dy)
             if dist < 20:
                 continue
             ux = dx / dist
@@ -724,36 +791,67 @@ class RoadCanvas(QWidget):
             stop_dist = max(16.0, 24.0 * min(2.0, self.zoom_level))
             stop_pt = QPointF(end.x() + ux * stop_dist, end.y() + uy * stop_dist)
 
-            moves = [
-                m["id"] for m in turning_movements
-                if m.get("intersection") == to_node and m.get("from_segment") == segment.get("id")
-            ]
+            # Signal indication at approach stop line
+            plan = self.signal_plans.get(to_node)
+            if plan:
+                moves = [
+                    m["id"] for m in turning_movements
+                    if m.get("intersection") == to_node and m.get("from_segment") == segment.get("id")
+                ]
 
-            approach_state = "RED"
-            if moves:
-                states = [plan.movement_state(mid, sim_time) for mid in moves]
-                if "GREEN" in states:
-                    approach_state = "GREEN"
-                elif "YELLOW" in states:
-                    approach_state = "YELLOW"
+                approach_state = "RED"
+                if moves:
+                    states = [plan.movement_state(mid, sim_time) for mid in moves]
+                    if "GREEN" in states:
+                        approach_state = "GREEN"
+                    elif "YELLOW" in states:
+                        approach_state = "YELLOW"
 
-            half_w = road_width / 2.0
-            p1 = QPointF(stop_pt.x() - px * half_w, stop_pt.y() - py * half_w)
-            p2 = QPointF(stop_pt.x() + px * half_w, stop_pt.y() + py * half_w)
-            painter.setPen(QPen(QColor("#ffffff"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
-            painter.drawLine(p1, p2)
+                half_w = road_width / 2.0
+                p1 = QPointF(stop_pt.x() - px * half_w, stop_pt.y() - py * half_w)
+                p2 = QPointF(stop_pt.x() + px * half_w, stop_pt.y() + py * half_w)
+                painter.setPen(QPen(QColor("#ffffff"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
+                painter.drawLine(p1, p2)
 
-            ind_pt = QPointF(stop_pt.x() + px * (half_w + 9.0), stop_pt.y() + py * (half_w + 9.0))
-            ind_color = self.COLOR_GREEN if approach_state == "GREEN" else (
-                self.COLOR_YELLOW if approach_state == "YELLOW" else self.COLOR_RED
-            )
-            ind_radius = max(5.0, min(9.0, 6.0 * min(1.8, max(0.8, self.zoom_level))))
-            painter.setPen(QPen(QColor("#ffffff"), 1.5))
-            painter.setBrush(QColor("#1e293b"))
-            painter.drawEllipse(ind_pt, ind_radius + 2, ind_radius + 2)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(ind_color)
-            painter.drawEllipse(ind_pt, ind_radius, ind_radius)
+                ind_pt = QPointF(stop_pt.x() + px * (half_w + 9.0), stop_pt.y() + py * (half_w + 9.0))
+                ind_color = self.COLOR_GREEN if approach_state == "GREEN" else (
+                    self.COLOR_YELLOW if approach_state == "YELLOW" else self.COLOR_RED
+                )
+                ind_radius = max(5.0, min(9.0, 6.0 * min(1.8, max(0.8, self.zoom_level))))
+                painter.setPen(QPen(QColor("#ffffff"), 1.5))
+                painter.setBrush(QColor("#1e293b"))
+                painter.drawEllipse(ind_pt, ind_radius + 2, ind_radius + 2)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(ind_color)
+                painter.drawEllipse(ind_pt, ind_radius, ind_radius)
+
+            # Authoritative queue state on this approach segment
+            q_state = self.get_queue_state(segment.get("id", ""))
+            if q_state["count"] > 0:
+                q_count = q_state["count"]
+                q_len_m = q_state["length_m"]
+                seg_len = max(1.0, float(segment.get("length_m", 100.0)))
+                # Render queue extent line along the approach lane
+                q_screen_extent = min(dist * 0.85, (q_len_m / seg_len) * dist)
+                q_tail_pt = QPointF(stop_pt.x() + ux * q_screen_extent, stop_pt.y() + uy * q_screen_extent)
+                painter.setPen(QPen(QColor("#f59e0b"), max(3, int(road_width * 0.45)),
+                                    Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                painter.drawLine(stop_pt, q_tail_pt)
+
+                # Render queue count badge near approach stop line
+                half_w = road_width / 2.0
+                q_badge_pt = QPointF(stop_pt.x() - px * (half_w + 14.0), stop_pt.y() - py * (half_w + 14.0))
+                q_text = f"Q: {q_count}"
+                painter.setFont(safe_font("Segoe UI", 8, QFont.Weight.Bold))
+                fm = painter.fontMetrics()
+                bw = fm.horizontalAdvance(q_text) + 8
+                bh = fm.height() + 4
+                badge_rect = QRectF(q_badge_pt.x() - bw / 2.0, q_badge_pt.y() - bh / 2.0, bw, bh)
+                painter.setPen(QPen(QColor("#ffffff"), 1))
+                painter.setBrush(self.COLOR_QUEUE)
+                painter.drawRoundedRect(badge_rect, 3, 3)
+                painter.setPen(QColor("#ffffff"))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, q_text)
 
         # 4. Draw intersection nodes, selection halos, and controls
         for intersection in intersections:
@@ -820,7 +918,10 @@ class RoadCanvas(QWidget):
                 vw = max(10, min(32, int(16 * min(2.0, max(0.7, self.zoom_level)))))
                 vh = max(8, min(24, int(12 * min(2.0, max(0.7, self.zoom_level)))))
 
-                painter.setPen(QPen(QColor("#ffffff"), 1))
+                # Distinct outline when vehicle is stopped or queued
+                is_queued = car.v < self.QUEUE_SPEED_THRESHOLD
+                pen_color = QColor("#d97706") if is_queued else QColor("#ffffff")
+                painter.setPen(QPen(pen_color, 1.8 if is_queued else 1.0))
                 painter.setBrush(self.VEHICLE_COLORS[index % len(self.VEHICLE_COLORS)])
                 painter.drawRoundedRect(int(x - vw / 2.0), int(y - vh / 2.0), vw, vh, 3, 3)
 
@@ -846,9 +947,9 @@ class RoadCanvas(QWidget):
             painter.setPen(QColor("#64748b"))
             painter.drawText(14, 24, zoom_text)
 
-        # Bottom-left Signal Status Legend (accessible dual color + letter indicator)
+        # Bottom-left Signal & Queue Status Legend (accessible dual color + letter indicator)
         if height >= 140:
-            legend_w, legend_h = 310, 28
+            legend_w, legend_h = 425, 28
             lx = 14
             ly = height - legend_h - 12
             painter.setPen(QPen(QColor("#cbd5e1"), 1))
@@ -859,6 +960,7 @@ class RoadCanvas(QWidget):
                 (self.COLOR_GREEN, "G", "Green (Go)", 10),
                 (self.COLOR_YELLOW, "Y", "Yellow (Caution)", 104),
                 (self.COLOR_RED, "R", "Red (Stop)", 216),
+                (self.COLOR_QUEUE, "Q", "Queue (Stopped)", 308),
             ]
             for color, letter, text, offset_x in items:
                 cx = lx + offset_x
@@ -866,7 +968,7 @@ class RoadCanvas(QWidget):
                 painter.setPen(QPen(QColor("#475569"), 1))
                 painter.setBrush(color)
                 painter.drawEllipse(QPointF(cx + 6, cy), 6.0, 6.0)
-                painter.setPen(QColor("#ffffff") if letter == "R" else QColor("#1e293b"))
+                painter.setPen(QColor("#ffffff") if letter in ("R", "Q") else QColor("#1e293b"))
                 painter.setFont(safe_font("Segoe UI", 6.5, QFont.Weight.Bold))
                 painter.drawText(QRectF(cx, cy - 6, 12, 12), Qt.AlignmentFlag.AlignCenter, letter)
                 painter.setFont(safe_font("Segoe UI", 8, QFont.Weight.Medium))
@@ -874,6 +976,22 @@ class RoadCanvas(QWidget):
                 painter.drawText(int(cx + 17), int(cy + 4), text)
 
         painter.end()
+
+        # TC-PERF-01 Performance Tracking
+        t_end = time.perf_counter()
+        dur_ms = (t_end - t_start) * 1000.0
+        self._last_frame_render_time_ms = dur_ms
+        self._total_frame_count += 1
+        self._frame_times.append(dur_ms)
+        if len(self._frame_times) > 60:
+            self._frame_times.pop(0)
+        self._frame_timestamps.append(t_end)
+        if len(self._frame_timestamps) > 60:
+            self._frame_timestamps.pop(0)
+        if len(self._frame_timestamps) >= 2:
+            dt_span = self._frame_timestamps[-1] - self._frame_timestamps[0]
+            if dt_span > 0:
+                self._fps_estimate = (len(self._frame_timestamps) - 1) / dt_span
 
 
 class Workbench(QMainWindow):
@@ -1403,6 +1521,50 @@ class Workbench(QMainWindow):
         inter_layout.addWidget(self.lbl_inter_header)
         inter_layout.addLayout(inter_form)
         inter_layout.addLayout(btn_row_inter)
+
+        # Permitted Turns Section
+        lbl_turns_header = QLabel("Permitted Turns (Movements):")
+        lbl_turns_header.setStyleSheet("font-weight: 600; color: #374151; margin-top: 8px;")
+        inter_layout.addWidget(lbl_turns_header)
+
+        self.table_inter_turns = QTableWidget()
+        self.table_inter_turns.setColumnCount(3)
+        self.table_inter_turns.setHorizontalHeaderLabels(["ID", "From Road", "To Road"])
+        self.table_inter_turns.horizontalHeader().setStretchLastSection(True)
+        self.table_inter_turns.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_inter_turns.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table_inter_turns.setMaximumHeight(105)
+        inter_layout.addWidget(self.table_inter_turns)
+
+        turn_form = QFormLayout()
+        turn_form.setSpacing(4)
+        self.combo_turn_from = QComboBox()
+        self.combo_turn_from.setFont(safe_font("Segoe UI", 9))
+        self.combo_turn_from.setToolTip("Incoming road segment entering this intersection")
+        self.combo_turn_to = QComboBox()
+        self.combo_turn_to.setFont(safe_font("Segoe UI", 9))
+        self.combo_turn_to.setToolTip("Outgoing road segment leaving this intersection")
+        turn_form.addRow("From Road:", self.combo_turn_from)
+        turn_form.addRow("To Road:", self.combo_turn_to)
+        inter_layout.addLayout(turn_form)
+
+        btn_row_turns = QHBoxLayout()
+        self.btn_add_turn = QPushButton("➕ Add Turn")
+        self.btn_add_turn.setObjectName("primary")
+        self.btn_add_turn.setStyleSheet("font-size: 8.5pt; padding: 4px;")
+        self.btn_add_turn.setToolTip("Permit turning movement between selected incoming and outgoing roads")
+        self.btn_add_turn.clicked.connect(self.add_permitted_turn)
+
+        self.btn_remove_turn = QPushButton("🗑 Remove Turn")
+        self.btn_remove_turn.setObjectName("danger")
+        self.btn_remove_turn.setStyleSheet("font-size: 8.5pt; padding: 4px;")
+        self.btn_remove_turn.setToolTip("Remove selected permitted turning movement")
+        self.btn_remove_turn.clicked.connect(self.remove_permitted_turn)
+
+        btn_row_turns.addWidget(self.btn_add_turn)
+        btn_row_turns.addWidget(self.btn_remove_turn)
+        inter_layout.addLayout(btn_row_turns)
+
         inter_layout.addStretch()
         self.inspector_stack.addWidget(page_inter)
 
@@ -1894,6 +2056,8 @@ class Workbench(QMainWindow):
             "Running": "background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
             "Paused": "background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
             "Completed": "background: #faf5ff; color: #6d28d9; border: 1px solid #e9d5ff; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
+            "Blocked": "background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
+            "Invalid": "background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; font-weight: 700; border-radius: 4px; padding: 2px 8px; font-size: 8.5pt;",
         }
         self.metric_status_label.setText(status)
         self.metric_status_label.setStyleSheet(styles.get(status, styles["Ready"]))
@@ -1932,6 +2096,7 @@ class Workbench(QMainWindow):
                 pos = inter.get("position", [0.0, 0.0])
                 self.edit_inter_x.setText(str(pos[0]))
                 self.edit_inter_y.setText(str(pos[1]))
+                self.sync_intersection_turns_ui(element_id)
                 self.inspector_stack.setCurrentIndex(1)
                 self.status_label.setText(f"Selected intersection '{element_id}'.")
                 sig_idx = self.combo_signal_plan.findData(element_id)
@@ -1958,6 +2123,133 @@ class Workbench(QMainWindow):
 
         # No selection: display scenario overview
         self.inspector_stack.setCurrentIndex(0)
+
+    def sync_intersection_turns_ui(self, inter_id: str):
+        """Populate permitted turns table and dropdowns for the selected intersection."""
+        if not hasattr(self, "table_inter_turns"):
+            return
+        network = self.scenario_data.get("network", {})
+        segments = network.get("segments", [])
+        turning_movements = network.get("turning_movements", [])
+
+        # Filter movements at this intersection
+        moves = [m for m in turning_movements if m.get("intersection") == inter_id]
+        self.table_inter_turns.setRowCount(len(moves))
+        for row, m in enumerate(moves):
+            id_item = QTableWidgetItem(str(m.get("id", "")))
+            from_item = QTableWidgetItem(str(m.get("from_segment", "")))
+            to_item = QTableWidgetItem(str(m.get("to_segment", "")))
+            for it in (id_item, from_item, to_item):
+                it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table_inter_turns.setItem(row, 0, id_item)
+            self.table_inter_turns.setItem(row, 1, from_item)
+            self.table_inter_turns.setItem(row, 2, to_item)
+
+        # Incoming segments end at inter_id
+        incoming = [s["id"] for s in segments if s.get("to") == inter_id]
+        # Outgoing segments start at inter_id
+        outgoing = [s["id"] for s in segments if s.get("from") == inter_id]
+
+        self.combo_turn_from.blockSignals(True)
+        self.combo_turn_from.clear()
+        for s in incoming:
+            self.combo_turn_from.addItem(s)
+        self.combo_turn_from.blockSignals(False)
+
+        self.combo_turn_to.blockSignals(True)
+        self.combo_turn_to.clear()
+        for s in outgoing:
+            self.combo_turn_to.addItem(s)
+        self.combo_turn_to.blockSignals(False)
+
+        can_add = bool(incoming and outgoing)
+        self.btn_add_turn.setEnabled(can_add)
+        self.btn_remove_turn.setEnabled(bool(moves))
+
+    def add_permitted_turn(self) -> bool:
+        """Define a new permitted turn (turning movement) at the selected intersection."""
+        iid = self.canvas.selected_id
+        if not iid or self.canvas.selected_type != "intersection":
+            return False
+
+        from_seg = self.combo_turn_from.currentText().strip()
+        to_seg = self.combo_turn_to.currentText().strip()
+        if not from_seg or not to_seg:
+            QMessageBox.warning(self, "Incomplete Selection", "Please select both an incoming and an outgoing road segment.")
+            return False
+
+        network = self.scenario_data.setdefault("network", {})
+        moves = network.setdefault("turning_movements", [])
+
+        # Check for duplicate
+        for m in moves:
+            if m.get("intersection") == iid and m.get("from_segment") == from_seg and m.get("to_segment") == to_seg:
+                QMessageBox.warning(self, "Duplicate Movement", f"A permitted turn from '{from_seg}' to '{to_seg}' already exists ({m.get('id')}).")
+                return False
+
+        existing_ids = [m["id"] for m in moves if "id" in m]
+        new_id = generate_unique_id("TM", existing_ids)
+        new_move = {
+            "id": new_id,
+            "intersection": iid,
+            "from_segment": from_seg,
+            "to_segment": to_seg,
+        }
+        moves.append(new_move)
+
+        # Set default turning ratio if demand exists
+        demand = self.scenario_data.setdefault("demand", {})
+        t_ratios = demand.setdefault("turning_ratios", {})
+        if new_id not in t_ratios:
+            seg_moves = [m["id"] for m in moves if m.get("from_segment") == from_seg]
+            split = round(1.0 / len(seg_moves), 3)
+            for sm in seg_moves:
+                t_ratios[sm] = split
+
+        self._pending_edit_description = "Add Permitted Turn"
+        self.on_network_modified()
+        self.sync_intersection_turns_ui(iid)
+        self.status_label.setText(f"Added permitted turn '{new_id}' ({from_seg} → {to_seg}) at intersection '{iid}'.")
+        return True
+
+    def remove_permitted_turn(self) -> bool:
+        """Remove selected permitted turning movement."""
+        iid = self.canvas.selected_id
+        if not iid or self.canvas.selected_type != "intersection":
+            return False
+
+        row = self.table_inter_turns.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "No Turn Selected", "Please select a permitted turn from the table to remove.")
+            return False
+
+        turn_item = self.table_inter_turns.item(row, 0)
+        if not turn_item:
+            return False
+        turn_id = turn_item.text()
+
+        network = self.scenario_data.get("network", {})
+        moves = network.get("turning_movements", [])
+        network["turning_movements"] = [m for m in moves if m.get("id") != turn_id]
+
+        # Clean up demand turning ratios
+        demand = self.scenario_data.get("demand", {})
+        if "turning_ratios" in demand:
+            demand["turning_ratios"].pop(turn_id, None)
+
+        # Clean up signal plans
+        raw_plans = get_scenario_signal_plans(self.scenario_data)
+        for p in raw_plans:
+            for ph in p.get("phases", []):
+                ph["movement_ids"] = [mid for mid in ph.get("movement_ids", []) if mid != turn_id]
+        set_scenario_signal_plans(self.scenario_data, raw_plans)
+
+        self._pending_edit_description = "Remove Permitted Turn"
+        self.on_network_modified()
+        self.sync_intersection_turns_ui(iid)
+        self.status_label.setText(f"Removed permitted turn '{turn_id}' from intersection '{iid}'.")
+        return True
+
 
     def apply_intersection_properties(self):
         """Validate and apply property edits to the selected intersection."""
@@ -2660,6 +2952,7 @@ class Workbench(QMainWindow):
                 ValidationIssue("FORMAT_ERROR", str(exc), "network", "")
             ])
 
+        self.validation_result = result
         self.validation_issues = result.issues
         self.validation_list.clear()
 
@@ -2672,7 +2965,8 @@ class Workbench(QMainWindow):
             self.validation_status_label.setStyleSheet("color: #d97706; font-weight: 700;")
             self.validation_list.show()
             for w in result.warnings:
-                item = QListWidgetItem(f"⚠ [{w.code}] {w.message}")
+                elem_info = f" ({w.element_type.title()} '{w.element_id}')" if w.element_id else ""
+                item = QListWidgetItem(f"⚠ [{w.code}]{elem_info} {w.message}")
                 item.setForeground(QColor("#d97706"))
                 self.validation_list.addItem(item)
         else:
@@ -2682,11 +2976,13 @@ class Workbench(QMainWindow):
             self.validation_status_label.setStyleSheet("color: #dc2626; font-weight: 700;")
             self.validation_list.show()
             for e in result.errors:
-                item = QListWidgetItem(f"❌ [{e.code}] {e.message}")
+                elem_info = f" ({e.element_type.title()} '{e.element_id}')" if e.element_id else ""
+                item = QListWidgetItem(f"❌ [{e.code}]{elem_info} {e.message}")
                 item.setForeground(QColor("#dc2626"))
                 self.validation_list.addItem(item)
             for w in result.warnings:
-                item = QListWidgetItem(f"⚠ [{w.code}] {w.message}")
+                elem_info = f" ({w.element_type.title()} '{w.element_id}')" if w.element_id else ""
+                item = QListWidgetItem(f"⚠ [{w.code}]{elem_info} {w.message}")
                 item.setForeground(QColor("#d97706"))
                 self.validation_list.addItem(item)
 
@@ -2699,6 +2995,13 @@ class Workbench(QMainWindow):
             issue = self.validation_issues[row]
             if issue.element_type in ("intersection", "segment") and issue.element_id:
                 self.canvas.set_selection(issue.element_type, issue.element_id)
+            elif issue.element_type == "turning_movement" and issue.element_id:
+                moves = self.scenario_data.get("network", {}).get("turning_movements", [])
+                mv = next((m for m in moves if m.get("id") == issue.element_id), None)
+                if mv and mv.get("intersection"):
+                    self.canvas.set_selection("intersection", mv["intersection"])
+                elif mv and mv.get("from_segment"):
+                    self.canvas.set_selection("segment", mv["from_segment"])
 
     def on_network_modified(self, description: str = ""):
         """Synchronize engine, metrics, canvas, demand, signal plans, and validation whenever network changes."""
@@ -2763,6 +3066,15 @@ class Workbench(QMainWindow):
         self.canvas.update()
 
     def start_simulation(self):
+        val_result = self.validate_current_network()
+        if not val_result.is_valid:
+            err_count = len(val_result.errors)
+            self.status_label.setText(
+                f"Simulation blocked: network has {err_count} validation error(s). Correct them before running."
+            )
+            self._update_status_badge("Blocked")
+            self.update_playback_controls_state()
+            return
         if self.engine is None or self.engine.finished:
             self.status_label.setText("Simulation finished or not ready — press Reset to run again")
             self.update_playback_controls_state()
@@ -2783,6 +3095,15 @@ class Workbench(QMainWindow):
         self.update_metrics()
 
     def step_simulation(self):
+        val_result = self.validate_current_network()
+        if not val_result.is_valid:
+            err_count = len(val_result.errors)
+            self.status_label.setText(
+                f"Simulation blocked: network has {err_count} validation error(s). Correct them before running."
+            )
+            self._update_status_badge("Blocked")
+            self.update_playback_controls_state()
+            return
         if self.engine is None or self.engine.finished:
             return
         if self.timer.isActive():
@@ -2866,7 +3187,10 @@ class Workbench(QMainWindow):
         if not hasattr(self, "btn_play"):
             return
 
-        if self.engine is None:
+        has_errors = hasattr(self, "validation_issues") and any(
+            getattr(i, "severity", "") == "error" for i in self.validation_issues
+        )
+        if self.engine is None or has_errors:
             self.btn_play.setEnabled(False)
             self.btn_play.setText("▶  Play")
             self.btn_pause.setEnabled(False)
@@ -2919,7 +3243,11 @@ class Workbench(QMainWindow):
     def update_metrics(self):
         if self.engine is None:
             if hasattr(self, "metric_status_label"):
-                self._update_status_badge("Ready")
+                val_result = getattr(self, "validate_current_network", lambda: None)()
+                if val_result and not val_result.is_valid:
+                    self._update_status_badge("Blocked")
+                else:
+                    self._update_status_badge("Ready")
             if hasattr(self, "metric_time"):
                 self.metric_time.setText("0.0 s")
             if hasattr(self, "metric_duration_label"):
@@ -2938,6 +3266,8 @@ class Workbench(QMainWindow):
                 self.remaining_label.setText("0")
             if hasattr(self, "mean_travel_time_label"):
                 self.mean_travel_time_label.setText("N/A")
+            if hasattr(self, "queue_metric_label"):
+                self.queue_metric_label.setText("Queue length: Not available")
             if hasattr(self, "history_tracker"):
                 self.history_tracker.reset()
             if hasattr(self, "timeline_widget"):
@@ -2984,6 +3314,14 @@ class Workbench(QMainWindow):
                 self.mean_travel_time_label.setText(f"{m.mean_travel_time:.1f} s")
             else:
                 self.mean_travel_time_label.setText("N/A")
+
+        if hasattr(self, "queue_metric_label"):
+            if m.simulated_time == 0.0 and not self.engine.running:
+                self.queue_metric_label.setText("Queue length: Not available")
+            else:
+                total_queued = sum(1 for c in self.engine.cars if c.v < RoadCanvas.QUEUE_SPEED_THRESHOLD)
+                self.queue_metric_label.setText(f"Active queue: {total_queued} veh")
+                self.queue_metric_label.setToolTip(f"Total stopped or queued vehicles in network (speed < {RoadCanvas.QUEUE_SPEED_THRESHOLD} m/s).")
 
         network = self.scenario_data.get("network", {})
         intersections = network.get("intersections", [])

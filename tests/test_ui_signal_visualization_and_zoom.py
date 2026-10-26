@@ -342,3 +342,125 @@ def test_canvas_rendering_empty_and_degenerate_networks(qapp):
     canvas.set_scenario(None, two_nodes_no_segs)
     canvas.render(pixmap)
     assert not pixmap.isNull()
+
+
+def test_authoritative_simulation_state_vehicle_rendering(workbench):
+    """Verify vehicles are rendered directly from authoritative engine state and advance across steps."""
+    # Step simulation until vehicles are generated and entered
+    while len(workbench.engine.cars) == 0 and not workbench.engine.finished:
+        workbench.engine.step()
+    workbench.update_metrics()
+    workbench.canvas.update()
+
+    cars = workbench.engine.cars
+    assert len(cars) > 0, "Simulation should have active vehicles after stepping."
+
+    # Record initial vehicle positions
+    initial_positions = {c.id: (c.route[c.leg], c.x, c.v) for c in cars}
+
+    # Verify canvas renders cleanly with active cars
+    pixmap = QPixmap(800, 600)
+    workbench.canvas.render(pixmap)
+    assert not pixmap.isNull()
+
+    # Advance 15 more steps
+    for _ in range(15):
+        workbench.engine.step()
+    workbench.update_metrics()
+    workbench.canvas.update()
+
+    # Verify positions advanced according to engine state
+    for car in workbench.engine.cars:
+        if car.id in initial_positions:
+            old_seg, old_x, _ = initial_positions[car.id]
+            curr_seg = car.route[car.leg]
+            if curr_seg == old_seg:
+                assert car.x >= old_x, f"Vehicle {car.id} should have advanced forward on {curr_seg}"
+
+
+def test_signal_transitions_and_approach_queue_updates(workbench):
+    """Verify traffic signal indications and approach queue state update dynamically from simulation engine."""
+    # Step until t=215.0s when car 10 is stopped at red light on approach R2
+    while workbench.engine.time < 215.0 and not workbench.engine.finished:
+        workbench.engine.step()
+    workbench.update_metrics()
+
+    q_state = workbench.canvas.get_queue_state("R2")
+    assert q_state["count"] >= 1, "Approach queue on R2 should have stopped vehicles at red light."
+    assert q_state["length_m"] > 0.0
+    assert len(q_state["vehicle_ids"]) == q_state["count"]
+
+    # Step until signal turns green and vehicle clears the queue (t=220.0s)
+    while workbench.engine.time < 220.0 and not workbench.engine.finished:
+        workbench.engine.step()
+    workbench.update_metrics()
+
+    q_cleared = workbench.canvas.get_queue_state("R2")
+    assert q_cleared["count"] == 0, "Approach queue on R2 should dissipate when signal turns green."
+    assert q_cleared["length_m"] == 0.0
+
+
+def test_invalid_run_handling_blocks_playback_controls(workbench):
+    """Verify invalid network configurations block simulation execution and display validation feedback."""
+    # Corrupt network with invalid negative speed limit
+    workbench.scenario_data["network"]["segments"][0]["speed_limit_mps"] = -10.0
+    val_result = workbench.validate_current_network()
+    assert not val_result.is_valid
+
+    # Attempt to start simulation
+    workbench.start_simulation()
+    assert workbench.engine.running is False
+    assert workbench.metric_status_label.text() in ("Blocked", "Invalid")
+    assert "Simulation blocked" in workbench.status_label.text()
+    assert workbench.btn_play.isEnabled() is False
+
+    # Attempt to step simulation
+    prev_time = workbench.engine.time
+    workbench.step_simulation()
+    assert workbench.engine.time == prev_time
+    assert workbench.engine.running is False
+
+
+def test_canvas_rendering_never_mutates_simulation_engine(workbench):
+    """Verify canvas rendering operations never mutate or perturb simulation engine state."""
+    # Step engine to an active state
+    while workbench.engine.time < 30.0 and not workbench.engine.finished:
+        workbench.engine.step()
+    workbench.update_metrics()
+
+    # Capture engine snapshot
+    snap_time = workbench.engine.time
+    snap_cars = [(c.id, c.route[c.leg], c.x, c.v) for c in workbench.engine.cars]
+    snap_signals = copy.deepcopy(workbench.engine.signals)
+
+    # Perform extensive canvas renders at various zooms and pans
+    pixmap = QPixmap(800, 600)
+    for z in (0.5, 1.0, 2.5):
+        workbench.canvas.set_zoom(z)
+        workbench.canvas.pan_offset = QPointF(50.0 * z, -30.0 * z)
+        workbench.canvas.render(pixmap)
+
+    # Verify engine state is 100% invariant
+    assert workbench.engine.time == snap_time
+    assert len(workbench.engine.cars) == len(snap_cars)
+    for c, snap in zip(workbench.engine.cars, snap_cars):
+        assert (c.id, c.route[c.leg], c.x, c.v) == snap
+    assert workbench.engine.signals == snap_signals
+
+
+def test_rendering_performance_metrics_instrumentation(workbench):
+    """Verify performance metrics instrumentation records frame render time and FPS estimate."""
+    canvas = workbench.canvas
+    metrics_initial = canvas.get_rendering_performance_metrics()
+    assert "fps" in metrics_initial
+    assert "last_frame_ms" in metrics_initial
+    assert "total_frames" in metrics_initial
+    assert "rolling_avg_ms" in metrics_initial
+
+    # Trigger a render
+    pixmap = QPixmap(800, 600)
+    canvas.render(pixmap)
+
+    metrics_after = canvas.get_rendering_performance_metrics()
+    assert metrics_after["total_frames"] >= 1
+    assert metrics_after["last_frame_ms"] >= 0.0
