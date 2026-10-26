@@ -7,18 +7,22 @@ Provides:
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -28,6 +32,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from tms_sim.reporting.export import export_comparison_csv, export_comparison_html
 
 from tms_sim.reporting.comparison import (
     ComparisonStatus,
@@ -198,6 +204,7 @@ class ScenarioComparisonDialog(QDialog):
     def __init__(self, workbench: Workbench, parent: QWidget | None = None):
         super().__init__(parent or workbench)
         self.workbench = workbench
+        self.current_comparison: ScenarioComparison | None = None
         self.setWindowTitle("Simulation Scenario Comparison — TMS-Sim")
         self.resize(840, 620)
         self.setMinimumSize(680, 480)
@@ -354,12 +361,28 @@ class ScenarioComparisonDialog(QDialog):
         self.stack.addWidget(self.report_page)
         main_layout.addWidget(self.stack, 1)
 
-        # 4. Footer with Close button
+        # 4. Footer with Export and Close buttons
         footer = QHBoxLayout()
         self.lbl_status = QLabel("")
         self.lbl_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
         footer.addWidget(self.lbl_status)
         footer.addStretch()
+
+        self.btn_export_csv = QPushButton("📄  Export CSV…")
+        self.btn_export_csv.setToolTip("Export the current scenario comparison as a CSV spreadsheet")
+        self.btn_export_csv.setStyleSheet(
+            "background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 5px 12px; font-weight: 600;"
+        )
+        self.btn_export_csv.clicked.connect(lambda checked=False: self.export_csv())
+        footer.addWidget(self.btn_export_csv)
+
+        self.btn_export_html = QPushButton("🌐  Export HTML…")
+        self.btn_export_html.setToolTip("Export the current scenario comparison as a readable HTML report")
+        self.btn_export_html.setStyleSheet(
+            "background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 5px 12px; font-weight: 600;"
+        )
+        self.btn_export_html.clicked.connect(lambda checked=False: self.export_html())
+        footer.addWidget(self.btn_export_html)
 
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.accept)
@@ -430,10 +453,15 @@ class ScenarioComparisonDialog(QDialog):
         """Recompute and render comparison if 2+ runs exist."""
         runs: list[SimulationRunRecord] = getattr(self.workbench, "captured_runs", [])
         if len(runs) < 2:
+            self.current_comparison = None
             self.stack.setCurrentWidget(self.empty_page)
             self.combo_baseline.setEnabled(False)
             self.combo_candidate.setEnabled(False)
             self.btn_swap.setEnabled(False)
+            if hasattr(self, "btn_export_csv"):
+                self.btn_export_csv.setEnabled(False)
+            if hasattr(self, "btn_export_html"):
+                self.btn_export_html.setEnabled(False)
             return
 
         self.combo_baseline.setEnabled(True)
@@ -447,11 +475,21 @@ class ScenarioComparisonDialog(QDialog):
         run_c = next((r for r in runs if r.run_id == id_c), None)
 
         if not run_b or not run_c:
+            self.current_comparison = None
             self.stack.setCurrentWidget(self.empty_page)
+            if hasattr(self, "btn_export_csv"):
+                self.btn_export_csv.setEnabled(False)
+            if hasattr(self, "btn_export_html"):
+                self.btn_export_html.setEnabled(False)
             return
 
         self.stack.setCurrentWidget(self.report_page)
         comparison = compare_runs(run_b, run_c)
+        self.current_comparison = comparison
+        if hasattr(self, "btn_export_csv"):
+            self.btn_export_csv.setEnabled(True)
+        if hasattr(self, "btn_export_html"):
+            self.btn_export_html.setEnabled(True)
 
         # Warning banner
         if comparison.warning:
@@ -465,6 +503,126 @@ class ScenarioComparisonDialog(QDialog):
 
         # Update Table
         self._populate_table(comparison)
+
+    def get_current_comparison(self) -> ScenarioComparison | None:
+        """Return the active ScenarioComparison or None if unavailable."""
+        return getattr(self, "current_comparison", None)
+
+    def confirm_overwrite(self, path: Path) -> bool:
+        """Prompt confirmation before overwriting an existing file."""
+        if hasattr(self.workbench, "confirm_overwrite"):
+            return self.workbench.confirm_overwrite(path)
+        app = QApplication.instance()
+        if app is not None and app.platformName() == "offscreen":
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Confirm Overwrite",
+            f"The file '{path.name}' already exists.\nDo you want to replace it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def export_csv(self, path: str | Path | None = None) -> bool:
+        """Export current scenario comparison to CSV."""
+        if path is None or isinstance(path, bool):
+            path = None
+
+        comparison = self.get_current_comparison()
+        if not comparison:
+            QMessageBox.warning(
+                self,
+                "Export Comparison",
+                "No valid comparison is available to export.\nPlease select two completed runs.",
+            )
+            return False
+
+        if path is None:
+            default_name = f"comparison_{comparison.baseline.scenario_name}_vs_{comparison.candidate.scenario_name}.csv".replace(" ", "_")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Comparison as CSV",
+                default_name,
+                "CSV Files (*.csv);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.lbl_status.setText("Export cancelled.")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() != ".csv":
+            dest = dest.with_suffix(".csv")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.lbl_status.setText("Export cancelled: existing file not overwritten.")
+            return False
+
+        try:
+            export_comparison_csv(comparison, dest)
+            self.lbl_status.setText(f"Comparison exported to '{dest.name}'.")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Comparison metrics successfully exported to:\n{dest}",
+            )
+            return True
+        except Exception as exc:
+            self.lbl_status.setText(f"Export failed: {exc}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export comparison:\n{exc}")
+            return False
+
+    def export_html(self, path: str | Path | None = None) -> bool:
+        """Export current scenario comparison to a readable HTML report."""
+        if path is None or isinstance(path, bool):
+            path = None
+
+        comparison = self.get_current_comparison()
+        if not comparison:
+            QMessageBox.warning(
+                self,
+                "Export Comparison",
+                "No valid comparison is available to export.\nPlease select two completed runs.",
+            )
+            return False
+
+        if path is None:
+            default_name = f"comparison_{comparison.baseline.scenario_name}_vs_{comparison.candidate.scenario_name}.html".replace(" ", "_")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Comparison as HTML",
+                default_name,
+                "HTML Files (*.html *.htm);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.lbl_status.setText("Export cancelled.")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() not in (".html", ".htm"):
+            dest = dest.with_suffix(".html")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.lbl_status.setText("Export cancelled: existing file not overwritten.")
+            return False
+
+        try:
+            export_comparison_html(comparison, dest)
+            self.lbl_status.setText(f"Comparison report exported to '{dest.name}'.")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Comparison report successfully exported to:\n{dest}",
+            )
+            return True
+        except Exception as exc:
+            self.lbl_status.setText(f"Export failed: {exc}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export comparison report:\n{exc}")
+            return False
 
     def _populate_table(self, comp: ScenarioComparison):
         """Populate the 6-column comparison table with formatted values and status badges."""

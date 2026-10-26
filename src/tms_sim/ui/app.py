@@ -62,7 +62,13 @@ from tms_sim.sim.serialization import (
     load_scenario_document,
     save_scenario_document,
 )
-from tms_sim.reporting.comparison import SimulationRunRecord
+from tms_sim.reporting.comparison import SimulationRunRecord, compare_runs
+from tms_sim.reporting.export import (
+    export_comparison_csv,
+    export_comparison_html,
+    export_run_csv,
+    export_run_html,
+)
 from tms_sim.ui.charts import LivePerformancePanel
 from tms_sim.ui.comparison import ScenarioComparisonDialog
 from tms_sim.ui.history import ScenarioHistoryManager
@@ -1045,6 +1051,25 @@ class Workbench(QMainWindow):
         self.save_as_action.triggered.connect(lambda checked=False: self.save_scenario_as())
 
         file_menu.addSeparator()
+        export_menu = file_menu.addMenu("&Export")
+        self.export_run_csv_action = export_menu.addAction("Simulation Run as &CSV...")
+        self.export_run_csv_action.setStatusTip("Export current completed simulation run metrics as CSV")
+        self.export_run_csv_action.triggered.connect(lambda checked=False: self.export_current_run_csv())
+
+        self.export_run_html_action = export_menu.addAction("Simulation Run as &HTML Report...")
+        self.export_run_html_action.setStatusTip("Export current completed simulation run as readable HTML report")
+        self.export_run_html_action.triggered.connect(lambda checked=False: self.export_current_run_html())
+
+        export_menu.addSeparator()
+        self.export_comparison_csv_action = export_menu.addAction("Scenario Comparison as CS&V...")
+        self.export_comparison_csv_action.setStatusTip("Export scenario comparison as CSV spreadsheet")
+        self.export_comparison_csv_action.triggered.connect(lambda checked=False: self.export_comparison_csv())
+
+        self.export_comparison_html_action = export_menu.addAction("Scenario Comparison as HT&ML Report...")
+        self.export_comparison_html_action.setStatusTip("Export scenario comparison as readable HTML report")
+        self.export_comparison_html_action.triggered.connect(lambda checked=False: self.export_comparison_html())
+
+        file_menu.addSeparator()
         exit_action = file_menu.addAction("E&xit")
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
@@ -1084,6 +1109,15 @@ class Workbench(QMainWindow):
         self.compare_action.setShortcut("Ctrl+M")
         self.compare_action.setStatusTip("Compare performance metrics across completed simulation runs")
         self.compare_action.triggered.connect(self.open_comparison_dialog)
+
+        sim_menu.addSeparator()
+        self.sim_export_run_csv_action = sim_menu.addAction("Export Run as CSV...")
+        self.sim_export_run_csv_action.setStatusTip("Export current completed simulation run metrics as CSV")
+        self.sim_export_run_csv_action.triggered.connect(lambda checked=False: self.export_current_run_csv())
+
+        self.sim_export_run_html_action = sim_menu.addAction("Export Run as HTML Report...")
+        self.sim_export_run_html_action.setStatusTip("Export current completed simulation run as readable HTML report")
+        self.sim_export_run_html_action.triggered.connect(lambda checked=False: self.export_current_run_html())
 
         # Header toolbar
         header = QHBoxLayout()
@@ -1567,6 +1601,21 @@ class Workbench(QMainWindow):
         self.btn_compare_runs.setToolTip("Compare completed simulation runs side-by-side (Ctrl+M)")
         self.btn_compare_runs.clicked.connect(self.open_comparison_dialog)
         rl.addWidget(self.btn_compare_runs)
+
+        export_btn_layout = QHBoxLayout()
+        export_btn_layout.setSpacing(6)
+        self.btn_export_run_csv = QPushButton("📄  Export CSV")
+        self.btn_export_run_csv.setStyleSheet("font-size: 8.5pt; padding: 4px;")
+        self.btn_export_run_csv.setToolTip("Export current or completed simulation run metrics as CSV")
+        self.btn_export_run_csv.clicked.connect(lambda checked=False: self.export_current_run_csv())
+        export_btn_layout.addWidget(self.btn_export_run_csv)
+
+        self.btn_export_run_html = QPushButton("🌐  Export HTML")
+        self.btn_export_run_html.setStyleSheet("font-size: 8.5pt; padding: 4px;")
+        self.btn_export_run_html.setToolTip("Export current or completed simulation run as readable HTML report")
+        self.btn_export_run_html.clicked.connect(lambda checked=False: self.export_current_run_html())
+        export_btn_layout.addWidget(self.btn_export_run_html)
+        rl.addLayout(export_btn_layout)
 
         right_layout.addWidget(results_panel)
 
@@ -3196,6 +3245,234 @@ class Workbench(QMainWindow):
         self.comparison_dialog.raise_()
         self.comparison_dialog.activateWindow()
         return self.comparison_dialog
+
+    def get_exportable_run(self) -> SimulationRunRecord | None:
+        """Return the current completed run record or latest captured run."""
+        if self.engine is not None and getattr(self.engine, "finished", False):
+            if not self.captured_runs:
+                return self.capture_current_run()
+            return self.captured_runs[-1]
+        elif self.captured_runs:
+            return self.captured_runs[-1]
+        return None
+
+    def export_current_run_csv(self, path: str | Path | None = None) -> bool:
+        """Export the current or latest completed simulation run as a CSV file."""
+        if path is None or isinstance(path, bool):
+            path = None
+
+        run = self.get_exportable_run()
+        if run is None:
+            self.status_label.setText("Export failed: No completed simulation run available.")
+            QMessageBox.warning(
+                self,
+                "Export Simulation Run",
+                "No completed simulation run is available to export.\n"
+                "Please run a simulation to 100% completion before exporting.",
+            )
+            return False
+
+        if path is None:
+            default_name = f"run_{run.scenario_name}_{int(run.metrics.duration)}s.csv".replace(" ", "_")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Simulation Run as CSV",
+                default_name,
+                "CSV Files (*.csv);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.status_label.setText("Export cancelled.")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() != ".csv":
+            dest = dest.with_suffix(".csv")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.status_label.setText("Export cancelled: existing file not overwritten.")
+            return False
+
+        try:
+            export_run_csv(run, dest)
+            self.status_label.setText(f"Simulation run exported to '{dest.name}'.")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Simulation run metrics successfully exported to:\n{dest}",
+            )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to export simulation run to CSV")
+            self.status_label.setText(f"Export failed: {exc}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export simulation run:\n{exc}")
+            return False
+
+    def export_current_run_html(self, path: str | Path | None = None) -> bool:
+        """Export the current or latest completed simulation run as a readable HTML report."""
+        if path is None or isinstance(path, bool):
+            path = None
+
+        run = self.get_exportable_run()
+        if run is None:
+            self.status_label.setText("Export failed: No completed simulation run available.")
+            QMessageBox.warning(
+                self,
+                "Export Simulation Run",
+                "No completed simulation run is available to export.\n"
+                "Please run a simulation to 100% completion before exporting.",
+            )
+            return False
+
+        if path is None:
+            default_name = f"run_{run.scenario_name}_{int(run.metrics.duration)}s.html".replace(" ", "_")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Simulation Run as HTML Report",
+                default_name,
+                "HTML Files (*.html *.htm);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.status_label.setText("Export cancelled.")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() not in (".html", ".htm"):
+            dest = dest.with_suffix(".html")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.status_label.setText("Export cancelled: existing file not overwritten.")
+            return False
+
+        try:
+            export_run_html(run, dest)
+            self.status_label.setText(f"Simulation run report exported to '{dest.name}'.")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Simulation run report successfully exported to:\n{dest}",
+            )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to export simulation run to HTML")
+            self.status_label.setText(f"Export failed: {exc}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export simulation report:\n{exc}")
+            return False
+
+    def export_comparison_csv(self, path: str | Path | None = None) -> bool:
+        """Export scenario comparison as CSV."""
+        if path is None or isinstance(path, bool):
+            path = None
+
+        if hasattr(self, "comparison_dialog") and self.comparison_dialog is not None and self.comparison_dialog.isVisible():
+            return self.comparison_dialog.export_csv(path)
+
+        if len(self.captured_runs) < 2:
+            self.status_label.setText("Export failed: At least two completed runs required for comparison.")
+            QMessageBox.warning(
+                self,
+                "Export Scenario Comparison",
+                "At least two completed simulation runs are required for comparison export.\n"
+                "Please run at least two simulations to completion.",
+            )
+            return False
+
+        comparison = compare_runs(self.captured_runs[0], self.captured_runs[-1])
+        if path is None:
+            default_name = f"comparison_{comparison.baseline.scenario_name}_vs_{comparison.candidate.scenario_name}.csv".replace(" ", "_")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Scenario Comparison as CSV",
+                default_name,
+                "CSV Files (*.csv);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.status_label.setText("Export cancelled.")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() != ".csv":
+            dest = dest.with_suffix(".csv")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.status_label.setText("Export cancelled: existing file not overwritten.")
+            return False
+
+        try:
+            export_comparison_csv(comparison, dest)
+            self.status_label.setText(f"Comparison exported to '{dest.name}'.")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Comparison metrics successfully exported to:\n{dest}",
+            )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to export comparison to CSV")
+            self.status_label.setText(f"Export failed: {exc}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export comparison:\n{exc}")
+            return False
+
+    def export_comparison_html(self, path: str | Path | None = None) -> bool:
+        """Export scenario comparison as a readable HTML report."""
+        if path is None or isinstance(path, bool):
+            path = None
+
+        if hasattr(self, "comparison_dialog") and self.comparison_dialog is not None and self.comparison_dialog.isVisible():
+            return self.comparison_dialog.export_html(path)
+
+        if len(self.captured_runs) < 2:
+            self.status_label.setText("Export failed: At least two completed runs required for comparison.")
+            QMessageBox.warning(
+                self,
+                "Export Scenario Comparison",
+                "At least two completed simulation runs are required for comparison export.\n"
+                "Please run at least two simulations to completion.",
+            )
+            return False
+
+        comparison = compare_runs(self.captured_runs[0], self.captured_runs[-1])
+        if path is None:
+            default_name = f"comparison_{comparison.baseline.scenario_name}_vs_{comparison.candidate.scenario_name}.html".replace(" ", "_")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Scenario Comparison as HTML",
+                default_name,
+                "HTML Files (*.html *.htm);;All Files (*)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not file_path:
+                self.status_label.setText("Export cancelled.")
+                return False
+            path = file_path
+
+        dest = Path(path)
+        if dest.suffix.lower() not in (".html", ".htm"):
+            dest = dest.with_suffix(".html")
+
+        if dest.exists() and not self.confirm_overwrite(dest):
+            self.status_label.setText("Export cancelled: existing file not overwritten.")
+            return False
+
+        try:
+            export_comparison_html(comparison, dest)
+            self.status_label.setText(f"Comparison report exported to '{dest.name}'.")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Comparison report successfully exported to:\n{dest}",
+            )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to export comparison to HTML")
+            self.status_label.setText(f"Export failed: {exc}")
+            QMessageBox.critical(self, "Export Failed", f"Failed to export comparison report:\n{exc}")
+            return False
 
 
 def main() -> int:
