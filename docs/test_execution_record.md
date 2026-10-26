@@ -2,9 +2,9 @@
 
 ## Latest full-suite run
 
-- **Date:** 2026-10-25
+- **Date:** 2026-10-26
 - **Branch:** `main`
-- **Commit tested:** `1ecfe88`
+- **Commit tested:** `b7c61175b61a3683990be502846eede40dfad2cf`
 - **Command:** `python -m pytest -q`
 - **Collected tests:** 165
 - **Passed:** 165
@@ -14,12 +14,12 @@
 ## Collection evidence
 
 - **Command:** `python -m pytest --collect-only -q`
-- **Collected:** 165 tests
+- **Collected:** 165 tests in the previously recorded collection run.
 
 ## Scope and limitations
 
-This result applies to the automated tests collected by pytest at the
-commit recorded above. It does not establish that every test case in
+This result applies to the automated tests collected by pytest at
+the commit recorded above. It does not establish that every test case in
 `docs/test_catalogue.md` has been executed or that every SRS requirement
 is fully implemented.
 
@@ -30,6 +30,7 @@ In particular:
   test verification.
 - The five proposed STP §13 traceability entries remain pending team review.
 - Non-functional acceptance criteria remain subject to baseline approval.
+- RTM mappings marked as drafts are not approved traceability decisions.
 - No individual catalogue test is marked Passed solely because the full
   suite passed.
 
