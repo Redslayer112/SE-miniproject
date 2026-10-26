@@ -423,6 +423,23 @@ class ScenarioComparisonDialog(QDialog):
 
         self._update_view()
 
+    def select_runs(self, baseline_run_id: str, candidate_run_id: str) -> None:
+        """Select specific baseline and candidate runs by run ID."""
+        self.refresh_runs()
+        idx_b = self.combo_baseline.findData(baseline_run_id)
+        idx_c = self.combo_candidate.findData(candidate_run_id)
+
+        self.combo_baseline.blockSignals(True)
+        self.combo_candidate.blockSignals(True)
+        if idx_b >= 0:
+            self.combo_baseline.setCurrentIndex(idx_b)
+        if idx_c >= 0:
+            self.combo_candidate.setCurrentIndex(idx_c)
+        self.combo_baseline.blockSignals(False)
+        self.combo_candidate.blockSignals(False)
+
+        self._update_view()
+
     def _on_selection_changed(self):
         """Update comparison report when user selects different runs."""
         self._update_view()

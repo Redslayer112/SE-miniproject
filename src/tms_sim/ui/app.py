@@ -72,6 +72,7 @@ from tms_sim.reporting.export import (
 from tms_sim.ui.charts import LivePerformancePanel
 from tms_sim.ui.comparison import ScenarioComparisonDialog
 from tms_sim.ui.history import ScenarioHistoryManager
+from tms_sim.ui.run_history import SimulationRunHistoryDialog
 
 logger = logging.getLogger(__name__)
 
@@ -936,7 +937,9 @@ class Workbench(QMainWindow):
         self.update_undo_redo_actions()
         self.captured_runs: list[SimulationRunRecord] = []
         self._last_captured_engine_finished_state: bool = False
+        self._last_captured_engine_signature: tuple[int, float, int] | None = None
         self.comparison_dialog: ScenarioComparisonDialog | None = None
+        self.history_dialog: SimulationRunHistoryDialog | None = None
 
     def build_ui(self):
         self.setStyleSheet("""
@@ -1105,10 +1108,15 @@ class Workbench(QMainWindow):
 
         # Simulation menu
         sim_menu = menubar.addMenu("&Simulation")
+        self.history_action = sim_menu.addAction("📜 Simulation Run &History...")
+        self.history_action.setShortcut("Ctrl+H")
+        self.history_action.setStatusTip("Browse and inspect completed simulation runs from current session")
+        self.history_action.triggered.connect(lambda checked=False: self.open_run_history_dialog())
+
         self.compare_action = sim_menu.addAction("⚖ &Compare Runs...")
         self.compare_action.setShortcut("Ctrl+M")
         self.compare_action.setStatusTip("Compare performance metrics across completed simulation runs")
-        self.compare_action.triggered.connect(self.open_comparison_dialog)
+        self.compare_action.triggered.connect(lambda checked=False: self.open_comparison_dialog())
 
         sim_menu.addSeparator()
         self.sim_export_run_csv_action = sim_menu.addAction("Export Run as CSV...")
@@ -1134,9 +1142,13 @@ class Workbench(QMainWindow):
         self.btn_redo.setToolTip("Redo last undone change (Ctrl+Y)")
         self.btn_redo.clicked.connect(self.redo)
 
+        self.btn_history = QPushButton("📜 History")
+        self.btn_history.setToolTip("Browse and inspect completed simulation runs (Ctrl+H)")
+        self.btn_history.clicked.connect(lambda checked=False: self.open_run_history_dialog())
+
         self.btn_compare = QPushButton("⚖ Compare")
         self.btn_compare.setToolTip("Compare completed simulation runs side-by-side (Ctrl+M)")
-        self.btn_compare.clicked.connect(self.open_comparison_dialog)
+        self.btn_compare.clicked.connect(lambda checked=False: self.open_comparison_dialog())
 
         self.reset_view_button = QPushButton("⟲ Reset View")
         self.reset_view_button.setToolTip("Reset canvas zoom and pan (Ctrl+R or double-click canvas)")
@@ -1594,13 +1606,25 @@ class Workbench(QMainWindow):
         # Backwards compatibility attributes
         self.remaining_label = QLabel("0")
 
-        self.btn_compare_runs = QPushButton("⚖  Compare Completed Runs…")
+        history_compare_layout = QHBoxLayout()
+        history_compare_layout.setSpacing(6)
+
+        self.btn_run_history = QPushButton("📜  Run History…")
+        self.btn_run_history.setStyleSheet(
+            "background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; font-weight: 600; padding: 5px; border-radius: 4px;"
+        )
+        self.btn_run_history.setToolTip("Browse and inspect completed simulation runs (Ctrl+H)")
+        self.btn_run_history.clicked.connect(lambda checked=False: self.open_run_history_dialog())
+        history_compare_layout.addWidget(self.btn_run_history)
+
+        self.btn_compare_runs = QPushButton("⚖  Compare Runs…")
         self.btn_compare_runs.setStyleSheet(
             "background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-weight: 600; padding: 5px; border-radius: 4px;"
         )
         self.btn_compare_runs.setToolTip("Compare completed simulation runs side-by-side (Ctrl+M)")
-        self.btn_compare_runs.clicked.connect(self.open_comparison_dialog)
-        rl.addWidget(self.btn_compare_runs)
+        self.btn_compare_runs.clicked.connect(lambda checked=False: self.open_comparison_dialog())
+        history_compare_layout.addWidget(self.btn_compare_runs)
+        rl.addLayout(history_compare_layout)
 
         export_btn_layout = QHBoxLayout()
         export_btn_layout.setSpacing(6)
@@ -2657,6 +2681,7 @@ class Workbench(QMainWindow):
         if self.timer.isActive():
             self.timer.stop()
         self._last_captured_engine_finished_state = False
+        self._last_captured_engine_signature = None
         if self.engine is not None:
             self.engine.reset()
             if hasattr(self, "speed_box"):
@@ -3211,6 +3236,12 @@ class Workbench(QMainWindow):
         if self.engine is None or not getattr(self.engine, "finished", False):
             return None
 
+        # Guard against duplicate capture of the exact same completed engine state
+        engine_sig = (id(self.engine), round(float(self.engine.time), 3), len(self.engine.events))
+        if getattr(self, "_last_captured_engine_signature", None) == engine_sig and self.captured_runs:
+            return self.captured_runs[-1]
+
+        self._last_captured_engine_signature = engine_sig
         run_idx = len(self.captured_runs) + 1
         scen_name = self.scenario_data.get("scenario_id") or (self.scenario_path.stem if self.scenario_path else "Scenario")
         run_label = label or f"Run {run_idx}: {scen_name}"
@@ -3224,6 +3255,8 @@ class Workbench(QMainWindow):
         self.captured_runs.append(record)
         if hasattr(self, "comparison_dialog") and self.comparison_dialog is not None and self.comparison_dialog.isVisible():
             self.comparison_dialog.refresh_runs()
+        if hasattr(self, "history_dialog") and self.history_dialog is not None and self.history_dialog.isVisible():
+            self.history_dialog.refresh_history()
         return record
 
     def _auto_capture_completed_run(self):
@@ -3235,16 +3268,33 @@ class Workbench(QMainWindow):
         self._last_captured_engine_finished_state = True
         self.capture_current_run()
 
-    def open_comparison_dialog(self) -> ScenarioComparisonDialog:
+    def open_comparison_dialog(
+        self, baseline_run_id: str | None = None, candidate_run_id: str | None = None
+    ) -> ScenarioComparisonDialog:
         """Open or bring to focus the scenario comparison dialog."""
         if not hasattr(self, "comparison_dialog") or self.comparison_dialog is None:
             self.comparison_dialog = ScenarioComparisonDialog(self)
         else:
             self.comparison_dialog.refresh_runs()
+
+        if baseline_run_id and candidate_run_id:
+            self.comparison_dialog.select_runs(baseline_run_id, candidate_run_id)
+
         self.comparison_dialog.show()
         self.comparison_dialog.raise_()
         self.comparison_dialog.activateWindow()
         return self.comparison_dialog
+
+    def open_run_history_dialog(self) -> SimulationRunHistoryDialog:
+        """Open or bring to focus the simulation run history dialog."""
+        if not hasattr(self, "history_dialog") or self.history_dialog is None:
+            self.history_dialog = SimulationRunHistoryDialog(self)
+        else:
+            self.history_dialog.refresh_history()
+        self.history_dialog.show()
+        self.history_dialog.raise_()
+        self.history_dialog.activateWindow()
+        return self.history_dialog
 
     def get_exportable_run(self) -> SimulationRunRecord | None:
         """Return the current completed run record or latest captured run."""

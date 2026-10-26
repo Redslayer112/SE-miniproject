@@ -66,6 +66,10 @@ class SimulationRunRecord:
         scen_name = scenario_name or getattr(engine, "scenario_id", "Scenario")
         record_label = label or f"{scen_name} ({metrics.simulated_time:.0f}s)"
 
+        if not timestamp:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         return cls(
             run_id=generated_id,
             label=record_label,
