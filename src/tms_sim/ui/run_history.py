@@ -120,6 +120,10 @@ class RunDetailsDialog(QDialog):
         footer.addWidget(btn_html)
 
         btn_close = QPushButton("Close")
+        btn_close.setToolTip("Close this dialog")
+        btn_close.setStyleSheet(
+            "background: #ffffff; border: 1px solid #d0d5dd; border-radius: 5px; padding: 5px 14px; font-weight: 500;"
+        )
         btn_close.clicked.connect(self.accept)
         footer.addWidget(btn_close)
         layout.addLayout(footer)
@@ -383,6 +387,10 @@ class SimulationRunHistoryDialog(QDialog):
         footer.addWidget(self.btn_export_html)
 
         btn_close = QPushButton("Close")
+        btn_close.setToolTip("Close run history dialog")
+        btn_close.setStyleSheet(
+            "background: #ffffff; border: 1px solid #d0d5dd; border-radius: 5px; padding: 5px 14px; font-weight: 500;"
+        )
         btn_close.clicked.connect(self.accept)
         footer.addWidget(btn_close)
         main_layout.addLayout(footer)

@@ -7,7 +7,7 @@ import math
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QPointF, Signal
+from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -184,7 +184,7 @@ class RoadCanvas(QWidget):
         self._has_dragged: bool = False
         self._press_pan_offset: QPointF = QPointF()
 
-        self.setStyleSheet("background: #e9eee9;")
+        self.setStyleSheet("background: #e9eee9; border: 1px solid #d0d7de; border-radius: 4px;")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -827,37 +827,51 @@ class RoadCanvas(QWidget):
         # Top HUD labels
         painter.setPen(QColor("#344054"))
         painter.setFont(safe_font("Segoe UI", 10, QFont.Weight.DemiBold))
-        painter.drawText(14, 24, "SCENARIO NETWORK  /  LIVE VEHICLES & SIGNALS")
-
         zoom_text = f"Zoom: {int(self.zoom_level * 100)}%"
         tool_text = f"Tool: {self.active_tool.replace('_', ' ').title()}"
-        painter.setFont(safe_font("Segoe UI", 9, QFont.Weight.Normal))
-        painter.setPen(QColor("#64748b"))
-        hint_text = f"{tool_text}  •  {zoom_text}  •  Scroll: Zoom  •  Drag: Pan"
-        painter.drawText(width - 320, 24, hint_text)
 
-        # Bottom-left Signal Status Legend
-        legend_w, legend_h = 285, 26
-        lx = 14
-        ly = height - legend_h - 12
-        painter.setPen(QPen(QColor("#cbd5e1"), 1))
-        painter.setBrush(QColor(255, 255, 255, 220))
-        painter.drawRoundedRect(lx, ly, legend_w, legend_h, 5, 5)
+        if width >= 660:
+            painter.drawText(14, 24, "SCENARIO NETWORK  /  LIVE VEHICLES & SIGNALS")
+            painter.setFont(safe_font("Segoe UI", 8.5, QFont.Weight.Normal))
+            painter.setPen(QColor("#64748b"))
+            hint_text = f"{tool_text}  •  {zoom_text}  •  Scroll: Zoom  •  Drag: Pan"
+            painter.drawText(width - 340, 24, hint_text)
+        elif width >= 440:
+            painter.drawText(14, 24, "NETWORK CANVAS")
+            painter.setFont(safe_font("Segoe UI", 8.5, QFont.Weight.Normal))
+            painter.setPen(QColor("#64748b"))
+            painter.drawText(width - 180, 24, f"{tool_text} • {zoom_text}")
+        else:
+            painter.setFont(safe_font("Segoe UI", 8.5, QFont.Weight.Normal))
+            painter.setPen(QColor("#64748b"))
+            painter.drawText(14, 24, zoom_text)
 
-        painter.setFont(safe_font("Segoe UI", 8, QFont.Weight.Medium))
-        items = [
-            (self.COLOR_GREEN, "Green (Go)", 12),
-            (self.COLOR_YELLOW, "Yellow (Caution)", 92),
-            (self.COLOR_RED, "Red (Stop)", 192),
-        ]
-        for color, text, offset_x in items:
-            cx = lx + offset_x
-            cy = ly + 13
-            painter.setPen(QPen(QColor("#ffffff"), 1))
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(cx, cy), 4.5, 4.5)
-            painter.setPen(QColor("#334155"))
-            painter.drawText(int(cx + 8), int(cy + 4), text)
+        # Bottom-left Signal Status Legend (accessible dual color + letter indicator)
+        if height >= 140:
+            legend_w, legend_h = 310, 28
+            lx = 14
+            ly = height - legend_h - 12
+            painter.setPen(QPen(QColor("#cbd5e1"), 1))
+            painter.setBrush(QColor(255, 255, 255, 230))
+            painter.drawRoundedRect(lx, ly, legend_w, legend_h, 5, 5)
+
+            items = [
+                (self.COLOR_GREEN, "G", "Green (Go)", 10),
+                (self.COLOR_YELLOW, "Y", "Yellow (Caution)", 104),
+                (self.COLOR_RED, "R", "Red (Stop)", 216),
+            ]
+            for color, letter, text, offset_x in items:
+                cx = lx + offset_x
+                cy = ly + 14
+                painter.setPen(QPen(QColor("#475569"), 1))
+                painter.setBrush(color)
+                painter.drawEllipse(QPointF(cx + 6, cy), 6.0, 6.0)
+                painter.setPen(QColor("#ffffff") if letter == "R" else QColor("#1e293b"))
+                painter.setFont(safe_font("Segoe UI", 6.5, QFont.Weight.Bold))
+                painter.drawText(QRectF(cx, cy - 6, 12, 12), Qt.AlignmentFlag.AlignCenter, letter)
+                painter.setFont(safe_font("Segoe UI", 8, QFont.Weight.Medium))
+                painter.setPen(QColor("#334155"))
+                painter.drawText(int(cx + 17), int(cy + 4), text)
 
         painter.end()
 
@@ -867,6 +881,7 @@ class Workbench(QMainWindow):
         super().__init__()
         self.setWindowTitle("TMS-Sim")
         self.resize(1366, 768)
+        self.setMinimumSize(980, 620)
 
         default_path = (
             Path(__file__).resolve().parents[3]
@@ -958,9 +973,14 @@ class Workbench(QMainWindow):
                 background: #ffffff;
                 border: 1px solid #d0d5dd;
                 border-radius: 5px;
-                padding: 8px 12px;
+                padding: 6px 12px;
+                min-height: 20px;
             }
-            QPushButton:hover { background: #edf4ff; }
+            QPushButton:hover { background: #edf4ff; border-color: #93c5fd; }
+            QPushButton:focus {
+                border: 1.5px solid #2563eb;
+                outline: none;
+            }
             QPushButton:checked {
                 background: #2563eb;
                 color: white;
@@ -970,14 +990,43 @@ class Workbench(QMainWindow):
             QPushButton#primary {
                 background: #2563eb;
                 color: white;
-                border: none;
+                border: 1px solid #1d4ed8;
                 font-weight: 600;
             }
-            QPushButton#primary:hover { background: #1d4ed8; }
+            QPushButton#primary:hover { background: #1d4ed8; border-color: #1e40af; }
+            QPushButton#primary:focus {
+                border: 2px solid #93c5fd;
+            }
             QPushButton:disabled {
                 background: #f8fafc;
                 color: #94a3b8;
                 border-color: #e2e8f0;
+            }
+            QLineEdit, QSpinBox, QComboBox {
+                background: #ffffff;
+                border: 1px solid #d0d5dd;
+                border-radius: 5px;
+                padding: 5px 8px;
+                color: #1f2937;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+                border: 1.5px solid #2563eb;
+                background: #ffffff;
+            }
+            QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
+                background: #f8fafc;
+                color: #94a3b8;
+                border-color: #e2e8f0;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px;
+                border-left: 1px solid #e2e8f0;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
             }
             QProgressBar {
                 border: 1px solid #d0d5dd;
@@ -1000,10 +1049,12 @@ class Workbench(QMainWindow):
                 color: #dc2626;
                 border: 1px solid #fca5a5;
             }
-            QPushButton#danger:hover { background: #fecaca; }
+            QPushButton#danger:hover { background: #fecaca; border-color: #f87171; }
+            QPushButton#danger:focus { border: 1.5px solid #dc2626; }
             QLabel#heading {
                 font-size: 14pt;
                 font-weight: 700;
+                color: #0f172a;
             }
             QLabel#muted { color: #667085; }
             QListWidget {
@@ -1012,6 +1063,9 @@ class Workbench(QMainWindow):
                 border-radius: 4px;
                 font-size: 9pt;
             }
+            QListWidget:focus {
+                border-color: #2563eb;
+            }
             QTableWidget {
                 background: #ffffff;
                 border: 1px solid #e2e8f0;
@@ -1019,14 +1073,50 @@ class Workbench(QMainWindow):
                 gridline-color: #f1f5f9;
                 font-size: 9pt;
             }
+            QTableWidget:focus {
+                border-color: #2563eb;
+            }
+            QTableWidget::item:selected {
+                background-color: #eff6ff;
+                color: #1e40af;
+            }
             QHeaderView::section {
                 background: #f8fafc;
                 color: #475467;
                 font-weight: 600;
-                padding: 4px;
+                padding: 5px 6px;
                 border: none;
                 border-bottom: 1px solid #e2e8f0;
                 font-size: 9pt;
+            }
+            QSplitter::handle {
+                background-color: #e2e8f0;
+            }
+            QSplitter::handle:horizontal {
+                width: 4px;
+            }
+            QSplitter::handle:vertical {
+                height: 4px;
+            }
+            QSplitter::handle:hover {
+                background-color: #3b82f6;
+            }
+            QScrollBar:vertical {
+                background: #f1f5f9;
+                width: 8px;
+                margin: 0;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #cbd5e1;
+                min-height: 24px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #94a3b8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
         """)
 
@@ -1172,8 +1262,12 @@ class Workbench(QMainWindow):
         header.addStretch()
         header.addWidget(self.btn_undo)
         header.addWidget(self.btn_redo)
+        header.addWidget(self._create_toolbar_separator())
+        header.addWidget(self.btn_history)
         header.addWidget(self.btn_compare)
+        header.addWidget(self._create_toolbar_separator())
         header.addWidget(self.reset_view_button)
+        header.addWidget(self._create_toolbar_separator())
         header.addWidget(self.open_button)
         header.addWidget(self.save_button)
         header.addWidget(self.save_as_button)
@@ -1287,8 +1381,11 @@ class Workbench(QMainWindow):
         self.combo_inter_control = QComboBox()
         self.combo_inter_control.setFont(safe_font("Segoe UI", 10))
         self.combo_inter_control.addItems(["uncontrolled", "signalized", "stop_controlled", "yield_controlled"])
+        self.combo_inter_control.setToolTip("Select traffic control type for the selected intersection")
         self.edit_inter_x = QLineEdit()
+        self.edit_inter_x.setToolTip("X position coordinate (meters)")
         self.edit_inter_y = QLineEdit()
+        self.edit_inter_y.setToolTip("Y position coordinate (meters)")
 
         inter_form.addRow("Control type:", self.combo_inter_control)
         inter_form.addRow("Position X (m):", self.edit_inter_x)
@@ -1324,9 +1421,12 @@ class Workbench(QMainWindow):
         seg_form.setSpacing(6)
 
         self.edit_seg_length = QLineEdit()
+        self.edit_seg_length.setToolTip("Road segment length in meters")
         self.spin_seg_lanes = QSpinBox()
         self.spin_seg_lanes.setRange(1, 10)
+        self.spin_seg_lanes.setToolTip("Number of traffic lanes")
         self.edit_seg_speed = QLineEdit()
+        self.edit_seg_speed.setToolTip("Speed limit in meters per second")
 
         seg_form.addRow("Length (m):", self.edit_seg_length)
         seg_form.addRow("Lane count:", self.spin_seg_lanes)
@@ -1379,10 +1479,12 @@ class Workbench(QMainWindow):
 
         self.combo_demand_segment = QComboBox()
         self.combo_demand_segment.setFont(safe_font("Segoe UI", 10))
+        self.combo_demand_segment.setToolTip("Select entry road segment for traffic demand")
         self.combo_demand_segment.currentTextChanged.connect(self.on_demand_combo_changed)
 
         self.edit_demand_rate = QLineEdit()
         self.edit_demand_rate.setPlaceholderText("e.g. 180.0")
+        self.edit_demand_rate.setToolTip("Arrival rate in vehicles per hour")
 
         demand_form.addRow("Entry Road:", self.combo_demand_segment)
         demand_form.addRow("Rate (veh/h):", self.edit_demand_rate)
@@ -1412,6 +1514,7 @@ class Workbench(QMainWindow):
         self.lbl_signal_inter.setStyleSheet("font-weight: 600; color: #374151;")
         self.combo_signal_plan = QComboBox()
         self.combo_signal_plan.setFont(safe_font("Segoe UI", 10))
+        self.combo_signal_plan.setToolTip("Select intersection to inspect or configure signal plan")
         self.combo_signal_plan.currentIndexChanged.connect(self.on_signal_plan_combo_changed)
         sig_header_layout.addWidget(self.lbl_signal_inter)
         sig_header_layout.addWidget(self.combo_signal_plan, 1)
@@ -1453,15 +1556,19 @@ class Workbench(QMainWindow):
         self.spin_phase_order = QSpinBox()
         self.spin_phase_order.setRange(1, 99)
         self.spin_phase_order.setValue(1)
+        self.spin_phase_order.setToolTip("Phase sequence order index")
 
         self.edit_phase_green = QLineEdit()
         self.edit_phase_green.setPlaceholderText("e.g. 20.0")
+        self.edit_phase_green.setToolTip("Green signal interval (seconds)")
 
         self.edit_phase_yellow = QLineEdit()
         self.edit_phase_yellow.setPlaceholderText("e.g. 3.0")
+        self.edit_phase_yellow.setToolTip("Yellow change interval (seconds)")
 
         self.edit_phase_all_red = QLineEdit()
         self.edit_phase_all_red.setPlaceholderText("e.g. 1.0")
+        self.edit_phase_all_red.setToolTip("All-red clearance interval (seconds)")
 
         phase_grid.addRow("Phase Order:", self.spin_phase_order)
         phase_grid.addRow("Green (s):", self.edit_phase_green)
@@ -1692,22 +1799,30 @@ class Workbench(QMainWindow):
         self.speed_box.currentTextChanged.connect(self.change_speed)
 
         for btn in (self.btn_play, self.btn_pause, self.btn_step, self.btn_reset):
+            btn.setMinimumWidth(75)
             control_layout.addWidget(btn)
 
-        control_layout.addSpacing(10)
+        control_layout.addWidget(self._create_toolbar_separator())
+
         lbl_speed = QLabel("Speed:")
         lbl_speed.setStyleSheet("color: #475467; font-weight: 600;")
+        self.speed_box.setToolTip("Simulation playback speed multiplier")
+        self.speed_box.setMinimumWidth(80)
         control_layout.addWidget(lbl_speed)
         control_layout.addWidget(self.speed_box)
 
-        control_layout.addSpacing(10)
+        control_layout.addWidget(self._create_toolbar_separator())
+
         lbl_prog = QLabel("Progress:")
         lbl_prog.setStyleSheet("color: #475467; font-weight: 600;")
         control_layout.addWidget(lbl_prog)
         control_layout.addWidget(self.progress_bar, 1)
 
-        control_layout.addSpacing(10)
+        control_layout.addWidget(self._create_toolbar_separator())
+
         self.clock_label.setStyleSheet("font-weight: 600; color: #0f172a;")
+        self.clock_label.setMinimumWidth(155)
+        self.clock_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         control_layout.addWidget(self.clock_label)
         outer.addWidget(controls)
 
@@ -1723,6 +1838,14 @@ class Workbench(QMainWindow):
 
         outer.addWidget(self.status_label)
         self.setCentralWidget(root)
+
+    @staticmethod
+    def _create_toolbar_separator() -> QFrame:
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFrameShadow(QFrame.Shadow.Plain)
+        sep.setStyleSheet("color: #d0d5dd; background-color: #d0d5dd; width: 1px; margin: 3px 6px;")
+        return sep
 
     @staticmethod
     def panel(title):
