@@ -40,3 +40,40 @@ class SignalPlan:
     def cycle_time_s(self) -> float:
         """Sum of all phase durations. Only meaningful for a plan that passed validation."""
         return sum(p.duration_s for p in self.phases)
+
+    def movement_state(self, movement_id: str, t: float) -> str:
+        """Return the signal indication ('GREEN', 'YELLOW', or 'RED') for movement_id at time t."""
+        cycle = self.cycle_time_s
+        if cycle <= 0:
+            return "RED"
+        t_mod = t % cycle
+        start = 0.0
+        active_state = "RED"
+        for ph in sorted(self.phases, key=lambda p: p.order):
+            if movement_id in ph.movement_ids:
+                green_end = start + ph.green_s
+                yellow_end = green_end + ph.yellow_s
+                if start <= t_mod < green_end:
+                    return "GREEN"
+                elif green_end <= t_mod < yellow_end:
+                    active_state = "YELLOW"
+            start += ph.duration_s
+        return active_state
+
+    def intersection_state(self, t: float) -> str:
+        """Return the active indication ('GREEN', 'YELLOW', or 'RED') for the intersection at time t."""
+        cycle = self.cycle_time_s
+        if cycle <= 0:
+            return "RED"
+        t_mod = t % cycle
+        start = 0.0
+        active_state = "RED"
+        for ph in sorted(self.phases, key=lambda p: p.order):
+            green_end = start + ph.green_s
+            yellow_end = green_end + ph.yellow_s
+            if start <= t_mod < green_end:
+                return "GREEN"
+            elif green_end <= t_mod < yellow_end:
+                active_state = "YELLOW"
+            start += ph.duration_s
+        return active_state
