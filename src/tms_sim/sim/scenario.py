@@ -95,8 +95,11 @@ def build_engine(network: Network, plans: list[SignalPlan], demand: dict, simula
                   duration=simulation.get("duration_s", 3600.0), params=Params(dt=dt), on_finish=on_finish)
 
 
-def load_scenario(path, on_finish=None) -> Engine:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+def engine_from_document(data: dict, on_finish=None) -> Engine:
     raw_plans = data.get("signal_plans") or ([data["signal_plan"]] if data.get("signal_plan") else [])
     plans = [plan_from_dict({"signal_plan": p}) for p in raw_plans]
     return build_engine(network_from_dict(data), plans, data.get("demand", {}), data.get("simulation", {}), on_finish)
+
+
+def load_scenario(path, on_finish=None) -> Engine:
+    return engine_from_document(json.loads(Path(path).read_text(encoding="utf-8")), on_finish)
