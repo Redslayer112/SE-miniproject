@@ -57,11 +57,12 @@ from tms_sim.signal import SignalPlan, SignalPhase, SignalPlanBlockedError
 from tms_sim.signal.validation import validate_signal_plan
 from tms_sim.signal.serialization import plan_from_dict, plan_to_dict
 from tms_sim.sim.demand import DemandError, validate_demand
-from tms_sim.sim.scenario import build_engine, load_scenario
+from tms_sim.sim.scenario import build_engine, engine_from_document, load_scenario
 from tms_sim.sim.serialization import (
     ScenarioFormatError,
     load_scenario_document,
     save_scenario_document,
+    scenario_from_dict,
 )
 from tms_sim.reporting.comparison import SimulationRunRecord, compare_runs
 from tms_sim.reporting.export import (
@@ -1260,6 +1261,11 @@ class Workbench(QMainWindow):
         self.save_as_action.setShortcut("Ctrl+Shift+S")
         self.save_as_action.setStatusTip("Save current scenario to a new JSON file")
         self.save_as_action.triggered.connect(lambda checked=False: self.save_scenario_as())
+
+        self.library_action = file_menu.addAction("Scenario &Library...")
+        self.library_action.setShortcut("Ctrl+L")
+        self.library_action.setStatusTip("Save, load, rename, duplicate and delete scenarios in the local library")
+        self.library_action.triggered.connect(lambda checked=False: self.open_scenario_library())
 
         file_menu.addSeparator()
         export_menu = file_menu.addMenu("&Export")
@@ -3359,9 +3365,16 @@ class Workbench(QMainWindow):
     def load_scenario_file(self, path: str | Path) -> bool:
         """Load and validate a scenario from path, preserving existing state on failure."""
         path = Path(path)
+        return self._load_scenario(lambda: (load_scenario_document(path), load_scenario(path)), path, path.name)
+
+    def load_scenario_data(self, document: dict, name: str) -> bool:
+        """Load a scenario document from the library (no file path: Save falls back to Save As)."""
+        return self._load_scenario(
+            lambda: (scenario_from_dict(document), engine_from_document(document)), None, name)
+
+    def _load_scenario(self, loader, path: Path | None, name: str) -> bool:
         try:
-            new_data = load_scenario_document(path)
-            new_engine = load_scenario(path)
+            new_data, new_engine = loader()
         except NetworkBlockedError as exc:
             logger.warning("Network validation failed for %s: %s", path, exc)
             bullet_points = "\n".join(f"• [{err.code}] {err.message}" for err in exc.errors)
@@ -3413,13 +3426,21 @@ class Workbench(QMainWindow):
         self.refresh_demand_ui()
         self.refresh_signal_plans_ui()
 
-        self.status_label.setText(f"Scenario '{self.scenario_path.name}' loaded successfully")
+        self.status_label.setText(f"Scenario '{name}' loaded successfully")
         self.set_dirty(False)
         if hasattr(self, "history_manager"):
             self.history_manager.reset(self.scenario_data)
         if hasattr(self, "update_undo_redo_actions"):
             self.update_undo_redo_actions()
         return True
+
+    def open_scenario_library(self):
+        from tms_sim.ui.library import ScenarioLibraryDialog
+
+        dialog = ScenarioLibraryDialog(self, getattr(self, "library_path", None))
+        dialog.show()
+        self.library_dialog = dialog
+        return dialog
 
     def _handle_load_error(self, message: str, status_msg: str):
         self.status_label.setText(f"Failed to load scenario: {status_msg}")
