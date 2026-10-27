@@ -48,7 +48,7 @@ def workbench(qapp, monkeypatch):
     win.canvas.resize(800, 600)
     yield win
     win.timer.stop()
-
+    win.close()
 
 def test_workbench_minimum_size(workbench):
     """Verify Workbench enforces a minimum size policy of at least 980x620."""
