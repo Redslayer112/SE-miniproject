@@ -1,4 +1,4 @@
-
+﻿
 """Generate a preliminary acceptance report from load-test JSON."""
 
 from __future__ import annotations
@@ -43,6 +43,10 @@ def main() -> int:
         and run.get("vehicles_in_network") == 0
         for run in results
     )
+    incomplete_at_cutoff = any(
+        run.get("vehicles_in_network", 0) > 0
+        for run in results
+    )
 
     lines = [
         "# Preliminary Acceptance Test Report",
@@ -83,7 +87,8 @@ def main() -> int:
         "## Preliminary checks",
         "",
         f"- Repeatability of vehicle counts: {'PASS' if repeatable else 'FAIL'}",
-        f"- All generated vehicles completed: {'PASS' if all_completed else 'FAIL'}",
+        f"- All generated vehicles completed: {'PASS' if all_completed else 'NOT ACHIEVED'}",
+        f"- Vehicles remaining at simulation cutoff: {'YES' if incomplete_at_cutoff else 'NO'}",
         "- Headless load-test execution: COMPLETED",
         "- GUI frame-rate target (15 FPS): NOT MEASURED",
         "- Total process RAM: NOT MEASURED",
