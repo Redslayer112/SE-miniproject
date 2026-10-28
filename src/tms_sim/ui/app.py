@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QKeySequence, QShortcut, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -121,7 +121,7 @@ def generate_unique_id(prefix: str, existing_ids: list[str]) -> str:
     return candidate
 
 
-def safe_font(family: str = "Segoe UI", point_size: int = 10, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
+def safe_font(family: str = "Segoe UI", point_size: int | float = 10, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
     """Return a QFont with a guaranteed positive integer point size, safely handling unspecified (-1) sizes."""
     valid_size = int(point_size) if point_size and int(point_size) > 0 else 10
     font = QFont(family, valid_size, weight)
@@ -183,6 +183,10 @@ class RoadCanvas(QWidget):
         self._last_frame_render_time_ms: float = 0.0
         self._fps_estimate: float = 0.0
         self._total_frame_count: int = 0
+        # Cumulative measurements from the first recorded frame to the latest.
+        self._first_frame_timestamp: float | None = None
+        self._last_frame_timestamp: float | None = None
+        self._total_frame_render_time_ms: float = 0.0
 
         # Tools & Selection state
         self.active_tool: str = "select"
@@ -277,14 +281,42 @@ class RoadCanvas(QWidget):
         }
 
     def get_rendering_performance_metrics(self) -> dict:
-        """Return frame render timing and FPS metrics for TC-PERF-01 compliance."""
-        avg_ms = (sum(self._frame_times) / len(self._frame_times)) if self._frame_times else 0.0
+        """Return rolling and cumulative rendering metrics for TC-PERF-01.
+
+        The full-run values cover the interval between the first and latest
+        recorded paint event. They do not automatically reset when a simulation
+        is restarted, so reset the canvas/measurements before a formal benchmark.
+        """
+        rolling_avg_ms = (
+            sum(self._frame_times) / len(self._frame_times)
+            if self._frame_times else 0.0
+        )
+        full_run_elapsed = 0.0
+        full_run_fps = 0.0
+        if (
+            self._first_frame_timestamp is not None
+            and self._last_frame_timestamp is not None
+        ):
+            full_run_elapsed = max(
+                0.0,
+                self._last_frame_timestamp - self._first_frame_timestamp,
+            )
+            if full_run_elapsed > 0.0:
+                full_run_fps = max(0, self._total_frame_count - 1) / full_run_elapsed
+
+        full_run_avg_ms = (
+            self._total_frame_render_time_ms / self._total_frame_count
+            if self._total_frame_count else 0.0
+        )
         return {
             "last_frame_ms": round(self._last_frame_render_time_ms, 2),
-            "avg_frame_ms": round(avg_ms, 2),
-            "rolling_avg_ms": round(avg_ms, 2),
+            "avg_frame_ms": round(rolling_avg_ms, 2),
+            "rolling_avg_ms": round(rolling_avg_ms, 2),
             "fps": round(self._fps_estimate, 1),
             "total_frames": self._total_frame_count,
+            "full_run_fps": round(full_run_fps, 2),
+            "full_run_avg_frame_ms": round(full_run_avg_ms, 2),
+            "full_run_elapsed_seconds": round(full_run_elapsed, 3),
         }
 
     def get_coordinate_bounds(self):
@@ -983,6 +1015,13 @@ class RoadCanvas(QWidget):
         dur_ms = (t_end - t_start) * 1000.0
         self._last_frame_render_time_ms = dur_ms
         self._total_frame_count += 1
+        self._total_frame_render_time_ms += dur_ms
+
+        if self._first_frame_timestamp is None:
+            self._first_frame_timestamp = t_end
+        self._last_frame_timestamp = t_end
+
+        # Keep a 60-frame window for live/rolling metrics.
         self._frame_times.append(dur_ms)
         if len(self._frame_times) > 60:
             self._frame_times.pop(0)
@@ -1401,7 +1440,7 @@ class Workbench(QMainWindow):
 
         # TOOLBOX
         toolbox = self.panel("TOOLBOX")
-        tools = toolbox.layout()
+        tools = self._panel_layout(toolbox)
 
         self.btn_tool_select = QPushButton("🔍  Select tool")
         self.btn_tool_select.setCheckable(True)
@@ -1442,7 +1481,7 @@ class Workbench(QMainWindow):
 
         # 2D ROAD NETWORK canvas panel
         network_panel = self.panel("2D ROAD NETWORK")
-        network_panel.layout().addWidget(self.canvas)
+        self._panel_layout(network_panel).addWidget(self.canvas)
         splitter.addWidget(network_panel)
 
         # Right sidebar: PROPERTIES, VALIDATION, LIVE METRICS
@@ -1453,7 +1492,7 @@ class Workbench(QMainWindow):
 
         # PROPERTIES INSPECTOR (Stacked Widget)
         props_frame = self.panel("PROPERTIES")
-        pl = props_frame.layout()
+        pl = self._panel_layout(props_frame)
 
         self.inspector_stack = QStackedWidget()
 
@@ -1621,7 +1660,7 @@ class Workbench(QMainWindow):
 
         # TRAFFIC DEMAND panel
         demand_frame = self.panel("TRAFFIC DEMAND")
-        dl = demand_frame.layout()
+        dl = self._panel_layout(demand_frame)
 
         self.lbl_demand_summary = QLabel("Configured Arrival Rates:")
         self.lbl_demand_summary.setStyleSheet("font-weight: 600; color: #374151;")
@@ -1675,7 +1714,7 @@ class Workbench(QMainWindow):
 
         # SIGNAL PLANS panel
         signal_frame = self.panel("SIGNAL PLANS")
-        sl = signal_frame.layout()
+        sl = self._panel_layout(signal_frame)
 
         sig_header_layout = QHBoxLayout()
         self.lbl_signal_inter = QLabel("Intersection:")
@@ -1782,7 +1821,7 @@ class Workbench(QMainWindow):
 
         # NETWORK VALIDATION panel
         val_frame = self.panel("NETWORK VALIDATION")
-        vl = val_frame.layout()
+        vl = self._panel_layout(val_frame)
         self.validation_status_label = QLabel("✔ Network Valid")
         self.validation_status_label.setStyleSheet("color: #16a34a; font-weight: 700;")
         self.validation_list = QListWidget()
@@ -1794,7 +1833,7 @@ class Workbench(QMainWindow):
 
         # SIMULATION RESULTS dashboard panel
         results_panel = self.panel("SIMULATION RESULTS")
-        rl = results_panel.layout()
+        rl = self._panel_layout(results_panel)
         rl.setSpacing(8)
 
         # Status & Time banner
@@ -1944,7 +1983,7 @@ class Workbench(QMainWindow):
         control_layout = QHBoxLayout()
         control_layout.setContentsMargins(8, 4, 8, 4)
         control_layout.setSpacing(8)
-        controls.layout().addLayout(control_layout)
+        self._panel_layout(controls).addLayout(control_layout)
 
         self.btn_play = QPushButton("▶  Play")
         self.btn_play.setObjectName("primary")
@@ -2016,7 +2055,15 @@ class Workbench(QMainWindow):
         return sep
 
     @staticmethod
-    def panel(title):
+    def _panel_layout(frame: QFrame) -> QVBoxLayout:
+        """Return the panel's vertical layout with a concrete type for Pylance."""
+        layout = frame.layout()
+        if not isinstance(layout, QVBoxLayout):
+            raise RuntimeError("Expected panel to contain a QVBoxLayout")
+        return layout
+
+    @staticmethod
+    def panel(title: str) -> QFrame:
         frame = QFrame()
         frame.setObjectName("panel")
         frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -2507,12 +2554,19 @@ class Workbench(QMainWindow):
         network = self.scenario_data.get("network", {})
         intersections = network.get("intersections", [])
         raw_plans = get_scenario_signal_plans(self.scenario_data)
-        plan_iids = {p.get("intersection_id") for p in raw_plans if p.get("intersection_id")}
+        plan_iids = {
+            str(p["intersection_id"])
+            for p in raw_plans
+            if p.get("intersection_id") is not None and p.get("intersection_id") != ""
+        }
         signalized_iids = [
-            i.get("id") for i in intersections
-            if str(i.get("control_type", "")).lower() == "signalized" and i.get("id")
+            str(i["id"])
+            for i in intersections
+            if str(i.get("control_type", "")).lower() == "signalized"
+            and i.get("id") is not None
+            and i.get("id") != ""
         ]
-        all_iids = sorted(list(plan_iids.union(signalized_iids)))
+        all_iids = sorted(plan_iids.union(signalized_iids))
 
         current_iid = self.combo_signal_plan.currentData()
         self.combo_signal_plan.blockSignals(True)
@@ -3460,8 +3514,7 @@ class Workbench(QMainWindow):
         if hasattr(self, "save_prompt_handler") and callable(self.save_prompt_handler):
             return self.save_prompt_handler()
 
-        app = QApplication.instance()
-        if app is not None and app.platformName() == "offscreen":
+        if QGuiApplication.platformName() == "offscreen":
             return "discard"
 
         box = QMessageBox(self)
@@ -3502,8 +3555,7 @@ class Workbench(QMainWindow):
 
     def confirm_overwrite(self, path: Path) -> bool:
         """Prompt confirmation before overwriting an existing file."""
-        app = QApplication.instance()
-        if app is not None and app.platformName() == "offscreen":
+        if QGuiApplication.platformName() == "offscreen":
             return True
         reply = QMessageBox.question(
             self,

@@ -1,0 +1,211 @@
+{
+    "schema_version": "1.0",
+    "scenario_id": "performance-10-intersections-001",
+    "name": "Performance Test - 10 Intersections",
+    "units": {
+        "length": "m",
+        "speed": "m/s",
+        "time": "s"
+    },
+    "network": {
+        "intersections": [
+            {
+                "id": "I1",
+                "position": [
+                    0,
+                    0
+                ],
+                "control_type": "signalized"
+            },
+            {
+                "id": "I2",
+                "position": [
+                    100,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I3",
+                "position": [
+                    200,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I4",
+                "position": [
+                    300,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I5",
+                "position": [
+                    400,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I6",
+                "position": [
+                    500,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I7",
+                "position": [
+                    600,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I8",
+                "position": [
+                    700,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I9",
+                "position": [
+                    800,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            },
+            {
+                "id": "I10",
+                "position": [
+                    900,
+                    0
+                ],
+                "control_type": "uncontrolled"
+            }
+        ],
+        "segments": [
+            {
+                "id": "R1",
+                "from": "I2",
+                "to": "I1",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R2",
+                "from": "I1",
+                "to": "I2",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R3",
+                "from": "I2",
+                "to": "I3",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R4",
+                "from": "I3",
+                "to": "I4",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R5",
+                "from": "I4",
+                "to": "I5",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R6",
+                "from": "I5",
+                "to": "I6",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R7",
+                "from": "I6",
+                "to": "I7",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R8",
+                "from": "I7",
+                "to": "I8",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R9",
+                "from": "I8",
+                "to": "I9",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            },
+            {
+                "id": "R10",
+                "from": "I9",
+                "to": "I10",
+                "length_m": 100,
+                "lane_count": 1,
+                "speed_limit_mps": 13.9
+            }
+        ],
+        "turning_movements": [
+            {
+                "id": "TM1",
+                "intersection": "I1",
+                "from_segment": "R1",
+                "to_segment": "R2"
+            }
+        ]
+    },
+    "signal_plan": {
+        "intersection_id": "I1",
+        "phases": [
+            {
+                "order": 1,
+                "movement_ids": [
+                    "TM1"
+                ],
+                "green_s": 20,
+                "yellow_s": 3,
+                "all_red_s": 1
+            }
+        ]
+    },
+    "demand": {
+        "arrival_rates_vehicles_per_hour": {
+            "R1": 500
+        },
+        "turning_ratios": {
+            "TM1": 1.0
+        }
+    },
+    "simulation": {
+        "seed": 42,
+        "duration_s": 3600,
+        "time_step_s": 0.1
+    }
+}
