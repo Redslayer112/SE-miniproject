@@ -1,0 +1,64 @@
+{
+  "created_at_utc": "2026-10-29T06:12:25.327858+00:00",
+  "python_version": "3.13.7",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "repeat": 3,
+  "results": [
+    {
+      "scenario": "C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject\\fixtures\\valid\\performance_10_intersections.json",
+      "seed": 42,
+      "simulated_seconds": 3600.099999997821,
+      "elapsed_seconds": 2.242121,
+      "cpu_seconds": 1.84375,
+      "peak_python_memory_bytes": 376453,
+      "vehicles_generated": 470,
+      "vehicles_entered": 470,
+      "vehicles_completed": 469,
+      "vehicles_in_network": 1,
+      "mean_travel_time_seconds": 16.54434968016039,
+      "run": 1
+    },
+    {
+      "scenario": "C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject\\fixtures\\valid\\performance_10_intersections.json",
+      "seed": 42,
+      "simulated_seconds": 3600.099999997821,
+      "elapsed_seconds": 1.82499,
+      "cpu_seconds": 1.65625,
+      "peak_python_memory_bytes": 256523,
+      "vehicles_generated": 470,
+      "vehicles_entered": 470,
+      "vehicles_completed": 469,
+      "vehicles_in_network": 1,
+      "mean_travel_time_seconds": 16.54434968016039,
+      "run": 2
+    },
+    {
+      "scenario": "C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject\\fixtures\\valid\\performance_10_intersections.json",
+      "seed": 42,
+      "simulated_seconds": 3600.099999997821,
+      "elapsed_seconds": 1.984221,
+      "cpu_seconds": 1.796875,
+      "peak_python_memory_bytes": 255627,
+      "vehicles_generated": 470,
+      "vehicles_entered": 470,
+      "vehicles_completed": 469,
+      "vehicles_in_network": 1,
+      "mean_travel_time_seconds": 16.54434968016039,
+      "run": 3
+    }
+  ],
+  "summary": {
+    "mean_elapsed_seconds": 2.017111,
+    "min_elapsed_seconds": 1.82499,
+    "max_elapsed_seconds": 2.242121,
+    "mean_cpu_seconds": 1.765625,
+    "max_peak_python_memory_bytes": 376453
+  },
+  "measurement_notes": [
+    "Elapsed time is wall-clock execution time.",
+    "CPU time is process CPU time consumed during each run.",
+    "Peak memory is traced Python allocation, not total process RAM.",
+    "Headless timings are not GUI FPS measurements.",
+    "No performance acceptance threshold is asserted."
+  ]
+}
