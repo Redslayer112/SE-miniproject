@@ -18,6 +18,6 @@ TMS-F-053,Compare completed runs,Metrics Service; Results Dashboard,TC-MET-04,Ve
 TMS-F-054,Export run summary as CSV,Report Exporter,TC-MET-05,Verified: stable CSV headers units values and error handling; see tests/test_reporting_export.py.,Verified for Issue #10
 TMS-F-060,Save/list/load/rename/delete scenarios,Scenario Store,TC-LIB-01,Storage choice and operation coverage require verification,Draft mapping
 TMS-NF-001,Performance: reference scenario at >=15 FPS,Cross-cutting / Renderer / Simulation Engine,TC-PERF-01,"Incomplete / blocked: GUI run stalled at 2123.6/3600 simulated seconds; partial FPS is not acceptance evidence. See docs/issue12_acceptance.md.",Incomplete / Blocked
-TMS-NF-002,Reliability,Cross-cutting,TC-REL-01,"Incomplete / blocked: three headless one-hour simulations passed; required GUI reliability runs did not complete. See artifacts/issue12/system_checks.json.",Incomplete / Blocked
+TMS-NF-002,Reliability,Cross-cutting,TC-REL-01,"Incomplete / blocked: three headless one-hour simulations passed; one 4x GUI hour completed at seed 42; seed 43 and 44 GUI attempts paused after mouse presses. Three clean GUI runs are not established; see artifacts/issue12/gui_4x_reliability_seed4*.json and system_checks.json.",Incomplete / Blocked
 TMS-NF-003,Usability,Workbench / UI,TC-UX-01,Blocked: no new-user participants; fixture automation does not establish usability acceptance.,Blocked
 TMS-NF-004,Windows portability,Application packaging / entry point,TC-PORT-01,Blocked: clean Windows 10 and Windows 11 environments unavailable.,Blocked
