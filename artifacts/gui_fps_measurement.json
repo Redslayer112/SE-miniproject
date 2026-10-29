@@ -1,0 +1,18 @@
+{
+  "scenario": "C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject\\fixtures\\valid\\performance_10_intersections.json",
+  "simulation_time_s": 19.5,
+  "simulation_finished": false,
+  "vehicles_generated": 470,
+  "vehicles_in_network": 3,
+  "metrics": {
+    "last_frame_ms": 4.29,
+    "avg_frame_ms": 3.77,
+    "rolling_avg_ms": 3.77,
+    "fps": 16.2,
+    "total_frames": 138,
+    "full_run_fps": 13.79,
+    "full_run_avg_frame_ms": 3.35,
+    "full_run_elapsed_seconds": 9.933
+  },
+  "note": "Short diagnostic only; not full TC-PERF-01 acceptance."
+}
