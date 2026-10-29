@@ -41,6 +41,7 @@ from tms_sim.reporting.comparison import (
     MetricDirection,
     ScenarioComparison,
     SimulationRunRecord,
+    calculate_metric_comparison,
     compare_runs,
 )
 

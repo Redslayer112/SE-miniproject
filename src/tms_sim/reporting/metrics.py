@@ -16,37 +16,38 @@ if TYPE_CHECKING:
 class SimulationMetrics:
     """Snapshot of simulation metrics at a point in time or at completion."""
 
-    status: str  # "Ready", "Running", "Paused", "Completed"
-    simulated_time: float  # Current simulated time in seconds
-    duration: float  # Configured total duration in seconds
-    vehicles_generated: int  # Authoritative count of vehicles generated so far
-    total_scheduled: int  # Total vehicles generated in scenario demand
-    vehicles_entered: int  # Unique vehicles that entered the network
-    vehicles_completed: int  # Unique vehicles that completed their journeys
-    vehicles_in_network: int  # Active vehicles currently inside the network
-    mean_travel_time: float | None  # Mean travel time (s) for completed trips; None if no completed trips
-    # Unsupported / unmodeled metrics in current backend (TMS-F-050)
+    status: str
+    simulated_time: float
+    duration: float
+    vehicles_generated: int
+    total_scheduled: int
+    vehicles_entered: int
+    vehicles_completed: int
+    vehicles_in_network: int
+    mean_travel_time: float | None
+
+    # Mean instantaneous speed of active vehicles, in metres per second.
+    average_speed_mps: float | None = None
+
+    # Metrics not yet fully modeled by the current backend.
     throughput_vph: float | None = None
     average_delay_s: float | None = None
     queue_length_veh: float | None = None
 
 
 def compute_metrics(engine: Engine | None) -> SimulationMetrics:
-    """Compute authoritative metrics from the engine state and event log.
+    """Compute authoritative metrics from engine state and event log.
 
     Semantics:
-    - Status: "Completed" if engine.finished; "Running" if engine.running;
-      "Paused" if engine.time > 0 and not running; "Ready" if engine.time == 0.
-    - Vehicles generated: Count of vehicles whose departure time has arrived
-      (depart_time <= engine.time). When engine.finished, equals total_scheduled.
-    - Vehicles entered: Count of unique vehicle IDs that spawned into the network.
-      A vehicle is NOT counted as entered merely because it was generated.
-    - Vehicles completed: Count of unique vehicle exit events.
-    - Vehicles in network: Current active vehicles (len(engine.cars)).
-    - Mean travel time: Average of (exit_time - spawn_time) for completed trips only.
-      Incomplete trips are excluded. If zero completed trips, returns None.
-    - Additional metrics (throughput, delay, queue lengths): None, as the current
-      backend does not model queues or track delays.
+    - Status is Completed, Running, Paused, or Ready.
+    - Vehicles generated counts demand with departure time <= current time.
+    - Vehicles entered counts unique vehicle IDs with spawn events.
+    - Vehicles completed counts unique vehicle IDs with exit events.
+    - Vehicles in network counts currently active cars.
+    - Mean travel time averages completed trips only.
+    - Average speed averages instantaneous speeds of currently active cars.
+      It is None when no vehicles are active.
+    - Throughput, delay, and queue length remain unavailable until modeled.
     """
     if engine is None:
         return SimulationMetrics(
@@ -59,9 +60,10 @@ def compute_metrics(engine: Engine | None) -> SimulationMetrics:
             vehicles_completed=0,
             vehicles_in_network=0,
             mean_travel_time=None,
+            average_speed_mps=None,
         )
 
-    # Status
+    # Determine simulation status.
     if engine.finished:
         status = "Completed"
     elif engine.running:
@@ -72,35 +74,55 @@ def compute_metrics(engine: Engine | None) -> SimulationMetrics:
         status = "Ready"
 
     total_scheduled = len(engine.vehicles)
+
     if engine.finished:
         vehicles_generated = total_scheduled
     else:
-        vehicles_generated = sum(1 for v in engine.vehicles if v.depart_time <= engine.time)
+        vehicles_generated = sum(
+            1 for vehicle in engine.vehicles
+            if vehicle.depart_time <= engine.time
+        )
 
+    # Recompute counts and trip durations from the event log.
     spawns: dict[int, float] = {}
-    exits: list[tuple[float, int]] = []
-    for event in engine.events:
-        # event: (time, vehicle_id, "spawn" | "exit", segment_id)
-        ev_time, veh_id, ev_type = event[0], event[1], event[2]
-        if ev_type == "spawn":
-            if veh_id not in spawns:
-                spawns[veh_id] = ev_time
-        elif ev_type == "exit":
-            exits.append((ev_time, veh_id))
+    exited_ids: set[int] = set()
 
-    vehicles_entered = len(spawns)
-    vehicles_completed = len(exits)
-    vehicles_in_network = len(engine.cars)
+    for event in engine.events:
+        # Event format: (time, vehicle_id, "spawn" | "exit", segment_id)
+        event_time, vehicle_id, event_type = (
+            event[0],
+            event[1],
+            event[2],
+        )
+
+        if event_type == "spawn":
+            if vehicle_id not in spawns:
+                spawns[vehicle_id] = event_time
+        elif event_type == "exit":
+            exited_ids.add(vehicle_id)
 
     travel_times = [
-        exit_time - spawns[veh_id]
-        for exit_time, veh_id in exits
-        if veh_id in spawns
+        event[0] - spawns[event[1]]
+        for event in engine.events
+        if event[2] == "exit" and event[1] in spawns
     ]
 
-    mean_travel_time: float | None = None
-    if travel_times:
-        mean_travel_time = sum(travel_times) / len(travel_times)
+    vehicles_entered = len(spawns)
+    vehicles_completed = len(exited_ids)
+    vehicles_in_network = len(engine.cars)
+
+    mean_travel_time = (
+        sum(travel_times) / len(travel_times)
+        if travel_times
+        else None
+    )
+
+    # Average instantaneous speed of active vehicles, in m/s.
+    average_speed_mps = (
+        sum(car.v for car in engine.cars) / len(engine.cars)
+        if engine.cars
+        else None
+    )
 
     return SimulationMetrics(
         status=status,
@@ -112,4 +134,5 @@ def compute_metrics(engine: Engine | None) -> SimulationMetrics:
         vehicles_completed=vehicles_completed,
         vehicles_in_network=vehicles_in_network,
         mean_travel_time=mean_travel_time,
+        average_speed_mps=average_speed_mps,
     )

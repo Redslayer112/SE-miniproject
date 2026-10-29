@@ -14,7 +14,9 @@ Covers:
 11. Dashboard values agree with CLI/backend calculations where comparable.
 12. Network/demand edits refresh dashboard with newly rebuilt engine.
 """
-
+from typing import cast
+from tms_sim.sim import engine
+from tms_sim.sim.engine import Engine
 import copy
 import json
 from pathlib import Path
@@ -281,3 +283,51 @@ def test_compute_metrics_standalone():
     assert m.throughput_vph is None
     assert m.queue_length_veh is None
     assert m.average_delay_s is None
+
+def test_average_speed_metric():
+    """Average speed is the mean speed of currently active vehicles."""
+    from types import SimpleNamespace
+    from typing import cast
+    from tms_sim.reporting.metrics import compute_metrics
+    from tms_sim.sim.engine import Engine
+
+    engine = SimpleNamespace(
+        finished=False,
+        running=True,
+        time=10.0,
+        duration=100.0,
+        vehicles=[],
+        events=[],
+        cars=[
+            SimpleNamespace(v=4.0),
+            SimpleNamespace(v=6.0),
+        ],
+    )
+
+    metrics = compute_metrics(cast(Engine, engine))
+
+    assert metrics.average_speed_mps == 5.0
+    assert metrics.vehicles_in_network == 2
+
+
+def test_average_speed_is_none_when_no_vehicles_are_active():
+    """Average speed is unavailable when no vehicles are in the network."""
+    from types import SimpleNamespace
+    from typing import cast
+    from tms_sim.reporting.metrics import compute_metrics
+    from tms_sim.sim.engine import Engine
+
+    engine = SimpleNamespace(
+        finished=False,
+        running=False,
+        time=10.0,
+        duration=100.0,
+        vehicles=[],
+        events=[],
+        cars=[],
+    )
+
+    metrics = compute_metrics(cast(Engine, engine))
+
+    assert metrics.average_speed_mps is None
+    assert metrics.vehicles_in_network == 0
