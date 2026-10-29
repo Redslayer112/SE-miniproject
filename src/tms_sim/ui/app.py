@@ -281,6 +281,17 @@ class RoadCanvas(QWidget):
             "vehicle_ids": [c.id for c in queued],
         }
 
+    def reset_rendering_performance_metrics(self) -> None:
+        """Start a fresh rendering measurement interval."""
+        self._frame_times.clear()
+        self._frame_timestamps.clear()
+        self._last_frame_render_time_ms = 0.0
+        self._fps_estimate = 0.0
+        self._total_frame_count = 0
+        self._first_frame_timestamp = None
+        self._last_frame_timestamp = None
+        self._total_frame_render_time_ms = 0.0
+
     def get_rendering_performance_metrics(self) -> dict:
         """Return rolling and cumulative rendering metrics for TC-PERF-01.
 

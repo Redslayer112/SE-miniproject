@@ -97,3 +97,21 @@ remains pending.
 - Tester: Pending
 - Reviewer: Pending
 - Final acceptance: Pending
+
+
+## Issue #12 verification update (2026-10-29)
+
+This section supersedes preliminary Issue #12 observations above where they conflict. All existing evidence files have been preserved.
+
+| Criterion | Status | Verified result |
+|---|---|---|
+| TC-PERF-01 | **INCOMPLETE / BLOCKED** | The latest 1x GUI run stopped at 2,123.6/3,600 simulated seconds. It stopped producing canvas frames and the harness exited 1. The partial interval reports 6.45 FPS but is not a complete-run acceptance value. See `artifacts/issue12/tc_perf_01_full_run_retry1.json`. No further long benchmark was launched. |
+| TC-REL-01 | **INCOMPLETE / BLOCKED** | Three headless one-hour simulations at seeds 42, 43, and 44 completed without exception. The required three completed GUI reliability runs were not obtained. See `artifacts/issue12/system_checks.json`. |
+| TC-UX-01 | **BLOCKED** | No new-user participants were tested. Automated fixture workflow is not human usability evidence. |
+| TC-PORT-01 | **BLOCKED** | Clean Windows 10 and Windows 11 installations were unavailable; testing occurred on the existing Windows 11 build 26300 host. |
+| TC-DEM-02 | **PASS** | Two independent seed-42 runs produced identical demand, all 36,940 metric events, and all reported metrics. Required throughput, delay, and queue metrics were non-null. |
+| Analyst workflow | **PASS — automated fixture path** | The Workbench loaded a two-intersection/two-segment scenario; saved/exported/imported/reloaded it; completed and persisted two runs to temporary SQLite; reloaded and compared them; updated results; and exported CSV which parsed as 20 rows. No manual network authoring is claimed. |
+| Focused automated tests | **PASS** | 17 passed in 11.81s; process exit 0. |
+| Full automated suite | **403 assertions passed; process exit abnormal** | Two runs reported 403 passed (57.00s and 57.31s) and then exited `-1073740791` (`0xC0000409`). The test assertions passed, but the process exit was nonzero. |
+
+The queue metric definition remains speed **below 0.5 m/s**. Delay remains the completed-trip mean against speed-limit-based free-flow time; incomplete trips are excluded. The benchmark and workflow each used temporary run-history databases; existing user records were not touched. Detailed criteria and risks are recorded in `docs/issue12_acceptance.md` and `artifacts/issue12/defect_log.md`. Issue #12 remains open because TC-PERF-01, TC-REL-01, TC-UX-01, and TC-PORT-01 are unresolved.
