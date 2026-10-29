@@ -66,6 +66,32 @@ throughput, delay, or queue length have been validated.
 
 The headless load test and GUI performance test are separate measurements. Traced Python memory is not total process RAM. The scenario used a demand rate of 500 vehicles/hour but generated 470 vehicles in the observed runs. The GUI completed the configured simulation, with one vehicle remaining in the network. Acceptance thresholds and the required FPS aggregation method must be confirmed against the approved requirements before sign-off.
 
+
+## 4. TC-REL-01 - Preliminary reliability runs
+
+- Scenario: `fixtures/valid/performance_10_intersections.json`
+- Environment: Windows-11-10.0.26300-SP0; Python 3.13.7
+- Seed: 42 for all three runs
+- Runs recorded: 3
+- Runs reaching at least 3,600 simulated seconds: 3/3
+- Crash reported by the test command: No
+- Result: **PRELIMINARY PASS - formal criteria approval pending**
+- Evidence: `artifacts/reliability_test.json`
+
+| Run | Simulated seconds | Generated | Completed | Remaining in network |
+|---:|---:|---:|---:|---:|
+| 1 | 3600.10 | 470 | 469 | 1 |
+| 2 | 3600.10 | 470 | 469 | 1 |
+| 3 | 3600.10 | 470 | 469 | 1 |
+
+All three headless runs reached the configured simulated duration. Each
+generated 470 vehicles, completed 469, and retained one vehicle at the
+simulation cutoff. This records successful execution, not proof that all
+vehicles completed their journeys. The test catalogue states that the
+reliability criteria require team approval, so formal TC-REL-01 acceptance
+remains pending.
+
+
 ## 5. Sign-off
 
 - Tester: Pending
