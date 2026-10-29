@@ -53,6 +53,7 @@ speed/queue measurements, but do not contribute to completed-trip time or delay.
 - Full-suite command: `python -m pytest -q`
 - Result: **402 passed**.
 - `python -m compileall -q src tests` completed successfully; `git diff --check` reported no whitespace errors.
+- Independently rerun on merged `main` at `42788fa24cc1a942dd26158c7e5d71f0ab6d9393`: targeted 103 passed; full suite 402 passed (exit code 0 on rerun).
 
 ## Limitations
 
@@ -60,5 +61,5 @@ speed/queue measurements, but do not contribute to completed-trip time or delay.
   a lane occupancy or physical detector model.
 - Delay uses speed-limit free-flow travel time and excludes incomplete trips; it does
   not model a separate desired-speed profile.
-- Automated verification is incomplete until the targeted tests and full suite execute
-  in an environment with the project's declared dependencies (`pytest` and PySide6).
+- These results apply to the recorded commands and environment; rerun the suites when
+  changing Python, pytest, PySide6 versions, or the operating system.
