@@ -38,9 +38,29 @@
 - GUI FPS acceptance: **NOT PASSED / NEEDS REVIEW**; final full-interval FPS must be reconciled with the agreed criterion.
 - GUI mean sampled FPS is descriptive only and does not replace the agreed acceptance measurement.
 - Total process RAM: NOT MEASURED
-- TC-DEM-02 same-seed comparison of all required metrics: NOT YET VERIFIED
+- TC-DEM-02 deterministic demand, event-log, and recorded-metric comparison: PASS for the fields checked
 - TC-REL-01, TC-UX-01, and TC-PORT-01: NOT YET VERIFIED
 - Full analyst workflow: NOT YET VERIFIED
+
+
+## 3. TC-DEM-02 - Deterministic repeatability
+
+- Scenario: `fixtures/valid/performance_10_intersections.json`
+- Seed: 42
+- Independent runs compared: 2
+- Generated demand: 470 vehicles
+- Event count: 939 per run
+- Scheduled demand identical: True
+- Complete spawn/exit event logs identical: True
+- Computed metrics identical: True
+- Result for comparisons executed: **PASS**
+- Evidence: `artifacts/dem_determinism_detail.json`
+
+The same scenario and seed produced identical scheduled vehicle demand,
+ordered spawn/exit events, and computed metrics in both independent runs.
+This supports deterministic repeatability for the fields compared by the
+verification script. It does not establish that unavailable metrics such as
+throughput, delay, or queue length have been validated.
 
 ## 4. Limitations and follow-up
 
