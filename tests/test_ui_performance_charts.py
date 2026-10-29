@@ -28,7 +28,7 @@ from PySide6.QtWidgets import QApplication
 
 from tms_sim.reporting.history import CompletedTrip, HistorySample, SimulationHistoryTracker
 from tms_sim.sim.scenario import load_scenario
-from tms_sim.ui.app import Workbench
+from tms_sim.ui.app import RoadCanvas, Workbench
 
 SAMPLE_SCENARIO_PATH = (
     Path(__file__).resolve().parent / "data" / "scenario" / "small_valid_scenario.json"
@@ -60,6 +60,30 @@ def test_history_tracker_initial_empty():
     assert len(tracker.completed_trips) == 0
     assert tracker._last_sampled_time is None
     assert tracker.record_state(None) is False
+
+
+def test_rendering_performance_metrics_reset_for_new_benchmark(qapp):
+    canvas = RoadCanvas()
+    canvas._frame_times.extend([1.0, 2.0])
+    canvas._frame_timestamps.extend([10.0, 11.0])
+    canvas._total_frame_count = 2
+    canvas._total_frame_render_time_ms = 3.0
+    canvas._first_frame_timestamp = 10.0
+    canvas._last_frame_timestamp = 11.0
+    canvas._fps_estimate = 1.0
+
+    canvas.reset_rendering_performance_metrics()
+
+    assert canvas.get_rendering_performance_metrics() == {
+        "last_frame_ms": 0.0,
+        "avg_frame_ms": 0.0,
+        "rolling_avg_ms": 0.0,
+        "fps": 0.0,
+        "total_frames": 0,
+        "full_run_fps": 0.0,
+        "full_run_avg_frame_ms": 0.0,
+        "full_run_elapsed_seconds": 0.0,
+    }
 
 
 def test_history_tracker_samples_recorded_at_expected_intervals():

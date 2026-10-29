@@ -61,5 +61,8 @@ speed/queue measurements, but do not contribute to completed-trip time or delay.
   a lane occupancy or physical detector model.
 - Delay uses speed-limit free-flow travel time and excludes incomplete trips; it does
   not model a separate desired-speed profile.
+- Analytical queue metrics count vehicles below 0.5 m/s. The GUI queue overlay and
+  vehicle highlighting use a separate 1.0 m/s visual cue threshold; the overlay is
+  not the reported queue-length metric.
 - These results apply to the recorded commands and environment; rerun the suites when
   changing Python, pytest, PySide6 versions, or the operating system.
