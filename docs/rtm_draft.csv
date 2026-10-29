@@ -11,11 +11,11 @@ TMS-F-040,Fixed-step microscopic simulation,Simulation Engine,TC-SIM-01,Model pa
 TMS-F-041,Start/pause/step/reset/speed controls,Simulation Engine; Workbench controls,TC-SIM-02,Verify supported speed multipliers 0.5x 1x 2x and 4x,Draft mapping
 TMS-F-042,Stop at configured duration and finalize metrics,Simulation Engine; Metrics Service; Scenario Store,TC-SIM-03,STP §13 entry proposed; pending team review. Automated duration/finalization test exists in tests/test_engine.py; full requirement acceptance still requires verification.,Draft mapping
 TMS-F-043,Render 2D vehicles signals and queues,2D Renderer,TC-SIM-04,Pan/zoom and engine/display consistency,Draft mapping
-TMS-F-050,Compute run metrics,Metrics Service,TC-MET-01,Independent recomputation,Draft mapping
-TMS-F-051,Display live metrics,Metrics Service; Results Dashboard,TC-MET-02,STP §13 entry proposed; pending team review. Live metrics/dashboard implementation requires verification.,Draft mapping
-TMS-F-052,Persist completed run data,Scenario Store,TC-MET-03,STP §13 entry proposed; pending team review. Completed-run persistence implementation requires verification.,Draft mapping
-TMS-F-053,Compare completed runs,Metrics Service; Results Dashboard,TC-MET-04,Keep run identities distinct,Draft mapping
-TMS-F-054,Export run summary as CSV,Report Exporter,TC-MET-05,Validate headers and values,Draft mapping
+TMS-F-050,Compute run metrics,Metrics Service,TC-MET-01,Verified: event-log metric calculations; see docs/issue10_acceptance.md and tests/test_metrics.py.,Verified for Issue #10
+TMS-F-051,Display live metrics,Metrics Service; Results Dashboard,TC-MET-02,Verified: dashboard live/final values; see tests/test_ui_results_dashboard.py.,Verified for Issue #10
+TMS-F-052,Persist completed run data,Scenario Store,TC-MET-03,Verified: scenario snapshot seed configuration and metrics round-trip; see tests/test_store.py.,Verified for Issue #10
+TMS-F-053,Compare completed runs,Metrics Service; Results Dashboard,TC-MET-04,Verified: two persisted runs and unit-aware differences; see tests/test_scenario_comparison.py.,Verified for Issue #10
+TMS-F-054,Export run summary as CSV,Report Exporter,TC-MET-05,Verified: stable CSV headers units values and error handling; see tests/test_reporting_export.py.,Verified for Issue #10
 TMS-F-060,Save/list/load/rename/delete scenarios,Scenario Store,TC-LIB-01,Storage choice and operation coverage require verification,Draft mapping
 TMS-NF-001,Performance: reference scenario at >=15 FPS,Cross-cutting / Renderer / Simulation Engine,TC-PERF-01,Scenario and measurement method require sign-off,Baseline decision required
 TMS-NF-002,Reliability,Cross-cutting,TC-REL-01,Proposed three seeded one-hour runs with zero crashes; approval pending,Baseline decision required

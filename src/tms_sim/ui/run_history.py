@@ -145,10 +145,16 @@ class RunDetailsDialog(QDialog):
             ("Total Scheduled Demand", str(m.total_scheduled), "veh", "Available", "Configured demand trips"),
             ("Simulated Time", f"{m.simulated_time:.1f}", "s", "Available", "Elapsed simulation time"),
             ("Simulation Duration", f"{m.duration:.1f}", "s", "Available", "Configured time horizon"),
-            ("Hourly Throughput", "N/A", "veh/h", "Unavailable", "Not modeled in simulation engine"),
-            ("Average Delay", "N/A", "s", "Unavailable", "Not modeled in simulation engine"),
-            ("Average Queue Length", "N/A", "veh", "Unavailable", "Not modeled in simulation engine"),
+            ("Hourly Throughput", f"{m.throughput_vph:.1f}" if m.throughput_vph is not None else "N/A", "veh/h", "Available" if m.throughput_vph is not None else "Unavailable", "Completed trips per simulated hour"),
+            ("Average Speed", f"{m.average_speed_mps:.1f}" if m.average_speed_mps is not None else "N/A", "m/s", "Available" if m.average_speed_mps is not None else "Unavailable", "Distance divided by vehicle-time including stopped time"),
+            ("Average Vehicle Delay", f"{m.average_delay_s:.1f}" if m.average_delay_s is not None else "N/A", "s", "Available" if m.average_delay_s is not None else "Unavailable", "Mean completed-trip delay from free-flow time"),
+            ("Maximum Vehicle Delay", f"{m.maximum_delay_s:.1f}" if m.maximum_delay_s is not None else "N/A", "s", "Available" if m.maximum_delay_s is not None else "Unavailable", "Maximum completed-trip delay from free-flow time"),
+            ("Average Queue Length", f"{m.queue_length_veh:.1f}" if m.queue_length_veh is not None else "N/A", "veh", "Available" if m.queue_length_veh is not None else "Unavailable", "Network-wide time-average queue count"),
         ]
+        rows.extend(
+            (f"Average Queue — {approach}", f"{value:.1f}", "veh", "Available", "Time-average queue count on this approach")
+            for approach, value in sorted(m.average_queue_length_by_approach.items())
+        )
 
         self.table.setRowCount(len(rows))
         for row_idx, (name, val, unit, status, desc) in enumerate(rows):

@@ -701,8 +701,11 @@ class ScenarioComparisonDialog(QDialog):
                 badge_text = "⚪ Unchanged"
                 badge_color = "#475569"
             elif m.status == ComparisonStatus.UNAVAILABLE:
-                badge_text = "— Not modeled"
+                badge_text = "— Unavailable"
                 badge_color = "#94a3b8"
+            elif m.status == ComparisonStatus.INCOMPATIBLE:
+                badge_text = "⚠ Incomplete run"
+                badge_color = "#b45309"
 
             item_status = QTableWidgetItem(badge_text)
             item_status.setForeground(QBrush(QColor(badge_color)))

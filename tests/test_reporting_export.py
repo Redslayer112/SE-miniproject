@@ -119,29 +119,53 @@ def test_generate_run_csv_headers_and_modeled_metrics():
     reader = list(csv.reader(csv_text.splitlines()))
     assert len(reader) >= 10
     header = reader[0]
-    assert header == ["Metric", "Value", "Unit", "Status", "Notes"]
+    assert header == ["Metric Key", "Metric", "Value", "Unit", "Status", "Notes"]
 
-    data_map = {row[0]: row for row in reader[1:]}
+    data_map = {row[1]: row for row in reader[1:]}
 
     # Metadata
-    assert data_map["Scenario Name"][1] == "Test Scenario"
-    assert data_map["Run Label"][1] == "Run 1: Test Scenario"
-    assert data_map["Run Status"][1] == "Completed"
-    assert data_map["Simulation Duration"][1] == "600.0"
-    assert data_map["Simulation Duration"][2] == "s"
+    assert data_map["Scenario Name"][2] == "Test Scenario"
+    assert data_map["Run Label"][2] == "Run 1: Test Scenario"
+    assert data_map["Run Status"][2] == "Completed"
+    assert data_map["Simulation Duration"][2] == "600.0"
+    assert data_map["Simulation Duration"][3] == "s"
 
     # Modeled metrics
-    assert data_map["Vehicles Completed"][1] == "25"
-    assert data_map["Vehicles Completed"][2] == "veh"
-    assert data_map["Vehicles Completed"][3] == "Available"
+    assert data_map["Vehicles Completed"][2] == "25"
+    assert data_map["Vehicles Completed"][3] == "veh"
+    assert data_map["Vehicles Completed"][4] == "Available"
 
-    assert data_map["Vehicles in Network"][1] == "5"
-    assert data_map["Vehicles in Network"][2] == "veh"
-    assert data_map["Vehicles in Network"][3] == "Available"
+    assert data_map["Vehicles in Network"][2] == "5"
+    assert data_map["Vehicles in Network"][3] == "veh"
+    assert data_map["Vehicles in Network"][4] == "Available"
 
-    assert data_map["Mean Travel Time"][1] == "16.4"
-    assert data_map["Mean Travel Time"][2] == "s"
-    assert data_map["Mean Travel Time"][3] == "Available"
+    assert data_map["Average Travel Time"][0] == "mean_travel_time_s"
+    assert data_map["Average Travel Time"][2] == "16.4"
+    assert data_map["Average Travel Time"][3] == "s"
+    assert data_map["Average Travel Time"][4] == "Available"
+
+
+def test_exported_csv_contains_measured_issue10_values(tmp_path):
+    metrics = SimulationMetrics(
+        status="Completed", simulated_time=100.0, duration=100.0,
+        vehicles_generated=4, total_scheduled=4, vehicles_entered=4,
+        vehicles_completed=3, vehicles_in_network=1,
+        mean_travel_time=12.34, average_speed_mps=7.89,
+        throughput_vph=108.0, average_delay_s=2.34, maximum_delay_s=4.56,
+        queue_length_veh=0.75, average_queue_length_by_approach={"A": 0.5},
+    )
+    run = SimulationRunRecord("csv-run", "CSV run", "Scenario", metrics)
+    path = tmp_path / "summary.csv"
+    export_run_csv(run, path)
+    with path.open(encoding="utf-8", newline="") as csv_file:
+        rows = list(csv.DictReader(csv_file))
+    values = {row["Metric Key"]: row for row in rows}
+    assert values["mean_travel_time_s"]["Value"] == "12.3"
+    assert values["average_delay_s"]["Value"] == "2.3"
+    assert values["maximum_delay_s"]["Value"] == "4.6"
+    assert values["throughput_vph"]["Value"] == "108.0"
+    assert values["average_speed_mps"]["Value"] == "7.9"
+    assert values["average_queue_length_veh:A"]["Value"] == "0.5"
 
 
 def test_missing_and_unmodeled_metrics_distinguished_from_zero():
@@ -152,28 +176,35 @@ def test_missing_and_unmodeled_metrics_distinguished_from_zero():
     csv_text = generate_run_csv(run)
 
     reader = list(csv.reader(csv_text.splitlines()))
-    data_map = {row[0]: row for row in reader[1:]}
+    data_map = {row[1]: row for row in reader[1:]}
 
     # Zero value check
-    assert data_map["Vehicles in Network"][1] == "0"
-    assert data_map["Vehicles in Network"][3] == "Available"
+    assert data_map["Vehicles in Network"][2] == "0"
+    assert data_map["Vehicles in Network"][4] == "Available"
 
     # None / Missing travel time check
-    assert data_map["Mean Travel Time"][1] == "N/A"
-    assert data_map["Mean Travel Time"][3] == "Unavailable"
+    assert data_map["Average Travel Time"][2] == "N/A"
+    assert data_map["Average Travel Time"][4] == "Unavailable"
 
     # Unmodeled metrics check
-    assert data_map["Hourly Throughput"][1] == "N/A"
-    assert data_map["Hourly Throughput"][2] == "veh/h"
-    assert data_map["Hourly Throughput"][3] == "Unavailable"
+    assert data_map["Throughput"][2] == "N/A"
+    assert data_map["Throughput"][3] == "veh/h"
+    assert data_map["Throughput"][4] == "Unavailable"
 
-    assert data_map["Average Delay"][1] == "N/A"
-    assert data_map["Average Delay"][2] == "s"
-    assert data_map["Average Delay"][3] == "Unavailable"
+    assert data_map["Average Vehicle Delay"][2] == "N/A"
+    assert data_map["Average Vehicle Delay"][3] == "s"
+    assert data_map["Average Vehicle Delay"][4] == "Unavailable"
 
-    assert data_map["Average Queue Length"][1] == "N/A"
-    assert data_map["Average Queue Length"][2] == "veh"
-    assert data_map["Average Queue Length"][3] == "Unavailable"
+    assert data_map["Average Queue Length"][2] == "N/A"
+    assert data_map["Average Queue Length"][3] == "veh"
+    assert data_map["Average Queue Length"][4] == "Unavailable"
+
+
+def test_invalid_export_path_reports_export_error():
+    from tms_sim.reporting.export import ExportError
+
+    with pytest.raises(ExportError, match="Invalid export path"):
+        export_run_csv(_make_dummy_run(), None)
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +350,8 @@ def test_utf8_text_and_csv_escaping(tmp_path):
     with open(out_csv, "r", encoding="utf-8") as f:
         rows = list(csv.reader(f))
 
-    data_map = {r[0]: r for r in rows[1:]}
-    assert data_map["Scenario Name"][1] == complex_name
+    data_map = {r[1]: r for r in rows[1:]}
+    assert data_map["Scenario Name"][2] == complex_name
 
 
 # ---------------------------------------------------------------------------

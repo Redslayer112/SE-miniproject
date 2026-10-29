@@ -69,6 +69,15 @@ def test_dashboard_updates_as_simulation_advances(workbench):
     """Verify dashboard metrics and running status update as simulation steps advance."""
     workbench.start_simulation()
     assert workbench.metric_status_label.text() == "Running"
+
+    live = compute_metrics(workbench.engine)
+    assert workbench.throughput_label.text() == (
+        f"{live.throughput_vph:.1f} veh/h" if live.throughput_vph is not None else "Not available"
+    )
+    assert workbench.average_speed_label.text() == (
+        f"Average speed: {live.average_speed_mps:.1f} m/s"
+        if live.average_speed_mps is not None else "Average speed: Not available"
+    )
     assert workbench.engine.running is True
 
     # Advance several ticks
@@ -201,6 +210,12 @@ def test_completion_preserves_final_metrics(workbench):
     assert int(workbench.entered_label.text()) > 0
     assert workbench.mean_travel_time_label.text() != "N/A"
     assert workbench.mean_travel_time_label.text().endswith(" s")
+    final = compute_metrics(workbench.engine)
+    assert workbench.throughput_label.text() == f"{final.throughput_vph:.1f} veh/h"
+    assert workbench.delay_metric_label.text() == (
+        f"Average delay: {final.average_delay_s:.1f} s; maximum delay: {final.maximum_delay_s:.1f} s"
+    )
+    assert workbench.average_speed_label.text() == f"Average speed: {final.average_speed_mps:.1f} m/s"
 
     # Calling update_metrics again preserves finished state
     workbench.update_metrics()

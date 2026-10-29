@@ -31,11 +31,11 @@
 | TC-SIM-02 | TMS-F-041 | Valid runnable scenario | Start, pause, single-step, reset; try speed multipliers 0.5x, 1x, 2x, 4x | Pause freezes time/state; single-step advances one step; reset returns to t=0; speed controls match selection |
 | TC-SIM-03 | TMS-F-042 | Scenario with configured total duration | Start run and allow duration to elapse | Run ends at configured simulated time within one step; final metrics are persisted exactly once |
 | TC-SIM-04 | TMS-F-043 | Valid scenario with vehicles and signals | Render scenario; inspect vehicle positions, signals and queues; pan/zoom | Displayed state matches engine state; pan and zoom work |
-| TC-MET-01 | TMS-F-050 | Completed run with event log suitable for independent recomputation | Compute average/maximum delay, average queue length, throughput, average speed and travel time | Reported metrics match independent calculations within documented rounding |
-| TC-MET-02 | TMS-F-051 | Active run with generated events | Observe results dashboard during run | Required live metrics are displayed and update consistently with simulation state |
-| TC-MET-03 | TMS-F-052 | Completed run with known scenario, seed and configuration | Save run; reload stored record | Run metrics, seed and configuration persist and reload correctly |
-| TC-MET-04 | TMS-F-053 | Two completed runs on comparable scenarios | Compare the two runs | Comparison table presents the required metrics for both runs without mixing run identities |
-| TC-MET-05 | TMS-F-054 | Completed run | Export summary metrics to CSV; parse exported file | CSV contains required metric headers and values; file is readable and corresponds to the selected run |
+| TC-MET-01 | TMS-F-050 | Completed, empty, and incomplete runs with lifecycle and measurement events | Recompute travel time, delay, queues per approach, throughput and average speed independently | Values match the event-log formula in `docs/issue10_acceptance.md`; unavailable values remain distinct from zero |
+| TC-MET-02 | TMS-F-051 | Active and completed runs | Observe results dashboard and compare with `compute_metrics` | Required live metrics update and completed dashboard values match final event-log metrics |
+| TC-MET-03 | TMS-F-052 | Completed run with known scenario, seed and configuration | Save; reopen store and reload | Scenario snapshot, seed, run configuration, metadata and metrics round-trip; malformed rows produce actionable errors |
+| TC-MET-04 | TMS-F-053 | Two saved runs; include different scenario names, unavailable metrics, and incomplete status | Load, select and compare runs | Both run identities, units, absolute differences, unavailable states, and compatibility warnings are displayed |
+| TC-MET-05 | TMS-F-054 | Completed run with measured values and unavailable metrics | Export CSV and parse the written file | Stable metric keys, names, units, statuses and one-decimal values match the summary; path/write errors are reported |
 | TC-LIB-01 | TMS-F-060 | Valid scenario in isolated scenario store | Save, list, load, rename and delete scenario | Each operation succeeds; list reflects changes; deleted scenario is absent |
 
 ## Non-functional test cases

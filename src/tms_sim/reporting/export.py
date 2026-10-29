@@ -48,35 +48,43 @@ def generate_run_csv(run: SimulationRunRecord | Engine) -> str:
     writer = csv.writer(output, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
 
     # Header
-    writer.writerow(["Metric", "Value", "Unit", "Status", "Notes"])
+    writer.writerow(["Metric Key", "Metric", "Value", "Unit", "Status", "Notes"])
 
     # Metadata
-    writer.writerow(["Scenario Name", record.scenario_name, "", "Available", "Scenario identifier"])
-    writer.writerow(["Run Label", record.label, "", "Available", "Simulation run label"])
-    writer.writerow(["Run ID", record.run_id, "", "Available", "Unique simulation run snapshot ID"])
+    writer.writerow(["scenario_name", "Scenario Name", record.scenario_name, "", "Available", "Scenario identifier"])
+    writer.writerow(["run_label", "Run Label", record.label, "", "Available", "Simulation run label"])
+    writer.writerow(["run_id", "Run ID", record.run_id, "", "Available", "Unique simulation run snapshot ID"])
     if record.timestamp:
-        writer.writerow(["Timestamp", record.timestamp, "", "Available", "Run execution or capture timestamp"])
-    writer.writerow(["Run Status", record.metrics.status, "", "Available", "Simulation completion state"])
-    writer.writerow(["Simulation Duration", f"{record.metrics.duration:.1f}", "s", "Available", "Configured simulation duration"])
-    writer.writerow(["Simulated Time", f"{record.metrics.simulated_time:.1f}", "s", "Available", "Elapsed simulation clock time"])
+        writer.writerow(["timestamp", "Timestamp", record.timestamp, "", "Available", "Run execution or capture timestamp"])
+    writer.writerow(["run_status", "Run Status", record.metrics.status, "", "Available", "Simulation completion state"])
+    writer.writerow(["duration_s", "Simulation Duration", f"{record.metrics.duration:.1f}", "s", "Available", "Configured simulation duration"])
+    writer.writerow(["simulated_time_s", "Simulated Time", f"{record.metrics.simulated_time:.1f}", "s", "Available", "Elapsed simulation clock time"])
 
     # Modeled metrics
     m = record.metrics
-    writer.writerow(["Vehicles Generated", str(m.vehicles_generated), "veh", "Available", "Scheduled vehicle demand"])
-    writer.writerow(["Total Scheduled Demand", str(m.total_scheduled), "veh", "Available", "Total demand configured in scenario"])
-    writer.writerow(["Vehicles Entered", str(m.vehicles_entered), "veh", "Available", "Unique vehicles that entered the network"])
-    writer.writerow(["Vehicles Completed", str(m.vehicles_completed), "veh", "Available", "Unique vehicles that completed their journeys"])
-    writer.writerow(["Vehicles in Network", str(m.vehicles_in_network), "veh", "Available", "Active vehicles currently inside the network"])
+    def metric(key: str, name: str, value, unit: str, note: str):
+        available = value is not None
+        formatted = f"{value:.1f}" if isinstance(value, float) else str(value) if available else "N/A"
+        writer.writerow([key, name, formatted, unit, "Available" if available else "Unavailable",
+                         note if available else f"{note}; not measured"])
 
-    if m.mean_travel_time is not None:
-        writer.writerow(["Mean Travel Time", f"{m.mean_travel_time:.1f}", "s", "Available", "Average completed trip duration"])
-    else:
-        writer.writerow(["Mean Travel Time", "N/A", "s", "Unavailable", "No completed trips recorded"])
-
-    # Explicitly unmodeled backend metrics (TMS-F-050)
-    writer.writerow(["Hourly Throughput", "N/A", "veh/h", "Unavailable", "Not modeled in current simulation engine"])
-    writer.writerow(["Average Delay", "N/A", "s", "Unavailable", "Not modeled in current simulation engine"])
-    writer.writerow(["Average Queue Length", "N/A", "veh", "Unavailable", "Not modeled in current simulation engine"])
+    for key, name, value, unit, note in (
+        ("vehicles_generated", "Vehicles Generated", m.vehicles_generated, "veh", "Demand scheduled by simulated time"),
+        ("total_scheduled", "Total Scheduled Demand", m.total_scheduled, "veh", "Total configured demand"),
+        ("vehicles_entered", "Vehicles Entered", m.vehicles_entered, "veh", "Unique spawned vehicles"),
+        ("vehicles_completed", "Vehicles Completed", m.vehicles_completed, "veh", "Unique completed trips"),
+        ("vehicles_in_network", "Vehicles in Network", m.vehicles_in_network, "veh", "Active vehicles at snapshot"),
+        ("mean_travel_time_s", "Average Travel Time", m.mean_travel_time, "s", "Completed trips only"),
+        ("maximum_delay_s", "Maximum Vehicle Delay", m.maximum_delay_s, "s", "Completed trip time minus free-flow time"),
+        ("average_delay_s", "Average Vehicle Delay", m.average_delay_s, "s", "Completed trip time minus free-flow time"),
+        ("throughput_vph", "Throughput", m.throughput_vph, "veh/h", "Completed trips per simulated hour"),
+        ("average_speed_mps", "Average Speed", m.average_speed_mps, "m/s", "Distance divided by vehicle-time, including stopped time"),
+        ("average_queue_length_veh", "Average Queue Length", m.queue_length_veh, "veh", "Network-wide time-average queue count"),
+    ):
+        metric(key, name, value, unit, note)
+    for approach, value in sorted(m.average_queue_length_by_approach.items()):
+        metric(f"average_queue_length_veh:{approach}", f"Average Queue Length — {approach}",
+               value, "veh", f"Time-average queue count on approach {approach}")
 
     return output.getvalue()
 
@@ -568,8 +576,10 @@ def generate_comparison_html(comparison: ScenarioComparison) -> str:
             badge = '<span class="badge badge-regressed">Regressed</span>'
         elif m.status == ComparisonStatus.UNCHANGED:
             badge = '<span class="badge badge-unchanged">Unchanged</span>'
+        elif m.status == ComparisonStatus.INCOMPATIBLE:
+            badge = '<span class="badge badge-unavailable">Incomplete run</span>'
         else:
-            badge = '<span class="badge badge-unavailable">Not Modeled</span>'
+            badge = '<span class="badge badge-unavailable">Unavailable</span>'
 
         rows_html.append(f"""
           <tr>
@@ -820,29 +830,38 @@ def _write_file_atomically(content: str, dest: Path) -> Path:
         raise ExportError(f"Failed to write export file to '{dest}': {exc}") from exc
 
 
+def _destination(path: str | Path) -> Path:
+    try:
+        if path is None or not str(path).strip():
+            raise ValueError("path is empty")
+        return Path(path)
+    except (TypeError, ValueError, OSError) as exc:
+        raise ExportError(f"Invalid export path {path!r}: {exc}") from exc
+
+
 def export_run_csv(run: SimulationRunRecord | Engine, path: str | Path) -> Path:
     """Export a simulation run's metrics to a UTF-8 CSV file."""
-    dest = Path(path)
+    dest = _destination(path)
     content = generate_run_csv(run)
     return _write_file_atomically(content, dest)
 
 
 def export_run_html(run: SimulationRunRecord | Engine, path: str | Path) -> Path:
     """Export a simulation run's metrics to a self-contained HTML report."""
-    dest = Path(path)
+    dest = _destination(path)
     content = generate_run_html(run)
     return _write_file_atomically(content, dest)
 
 
 def export_comparison_csv(comparison: ScenarioComparison, path: str | Path) -> Path:
     """Export a scenario comparison report to a UTF-8 CSV file."""
-    dest = Path(path)
+    dest = _destination(path)
     content = generate_comparison_csv(comparison)
     return _write_file_atomically(content, dest)
 
 
 def export_comparison_html(comparison: ScenarioComparison, path: str | Path) -> Path:
     """Export a scenario comparison report to a self-contained HTML report."""
-    dest = Path(path)
+    dest = _destination(path)
     content = generate_comparison_html(comparison)
     return _write_file_atomically(content, dest)

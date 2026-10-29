@@ -1,6 +1,7 @@
 """Scenario Store (#9): TC-NET-04 round trip, TC-LIB-01 CRUD + restart persistence, safe import."""
 import copy
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,7 @@ def test_run_record_round_trip_preserves_metadata_and_metrics(store):
         seed=42,
         scenario_snapshot=scenario_snapshot,
         metrics=metrics,
+        run_config={"duration_s": 600.0, "time_step_s": 0.5},
     )
 
     restored = store.load_run("run_round_trip")
@@ -149,3 +151,30 @@ def test_run_record_round_trip_preserves_metadata_and_metrics(store):
     assert restored["seed"] == 42
     assert restored["scenario_snapshot"] == scenario_snapshot
     assert restored["metrics"] == metrics
+    assert restored["run_config"] == {"duration_s": 600.0, "time_step_s": 0.5}
+
+
+def test_malformed_saved_run_is_reported_as_store_error(store):
+    store.save_run("bad-json", "Scenario", "Broken", "2026-10-29T00:00:00", 42,
+                   DOC, {"vehicles_completed": 0}, {"duration_s": 10.0})
+    store._db.execute("UPDATE runs SET metrics = ? WHERE run_id = ?", ("{broken", "bad-json"))
+    with pytest.raises(ScenarioStoreError, match="unreadable"):
+        store.load_run("bad-json")
+
+
+def test_non_json_run_data_is_refused(store):
+    with pytest.raises(ScenarioStoreError, match="Could not save run"):
+        store.save_run("nan", "Scenario", "Bad", "2026-10-29T00:00:00", 1,
+                       DOC, {"bad": float("nan")})
+
+
+def test_existing_run_database_is_migrated_with_empty_run_config(tmp_path):
+    db = tmp_path / "old-library.sqlite3"
+    connection = sqlite3.connect(db)
+    connection.execute("CREATE TABLE runs (run_id TEXT PRIMARY KEY, scenario_name TEXT NOT NULL, label TEXT NOT NULL, timestamp TEXT NOT NULL, seed INTEGER, scenario_snapshot TEXT NOT NULL, metrics TEXT NOT NULL)")
+    connection.commit()
+    connection.close()
+    with ScenarioStore(db) as upgraded:
+        upgraded.save_run("new", "Scenario", "New", "2026-10-29T12:00:00", 1,
+                          DOC, {"vehicles_completed": 0}, {"duration_s": 20.0})
+        assert upgraded.load_run("new")["run_config"] == {"duration_s": 20.0}
