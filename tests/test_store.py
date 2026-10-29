@@ -119,3 +119,33 @@ def test_run_records_keep_their_own_snapshot(store):  # contract for #10 / AC-05
     assert [r["run_id"] for r in store.list_runs("s")] == ["r1"]
     with pytest.raises(ScenarioStoreError):
         store.load_run("missing")
+
+def test_run_record_round_trip_preserves_metadata_and_metrics(store):
+    scenario_snapshot = copy.deepcopy(DOC)
+    metrics = {
+        "mean_travel_time": 16.4,
+        "vehicles_generated": 30,
+        "vehicles_entered": 30,
+        "vehicles_completed": 30,
+        "vehicles_in_network": 0,
+    }
+
+    store.save_run(
+        run_id="run_round_trip",
+        scenario_name="Test Scenario",
+        label="Baseline Run",
+        timestamp="2026-10-29T10:00:00",
+        seed=42,
+        scenario_snapshot=scenario_snapshot,
+        metrics=metrics,
+    )
+
+    restored = store.load_run("run_round_trip")
+
+    assert restored["run_id"] == "run_round_trip"
+    assert restored["scenario_name"] == "Test Scenario"
+    assert restored["label"] == "Baseline Run"
+    assert restored["timestamp"] == "2026-10-29T10:00:00"
+    assert restored["seed"] == 42
+    assert restored["scenario_snapshot"] == scenario_snapshot
+    assert restored["metrics"] == metrics

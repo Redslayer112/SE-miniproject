@@ -65,6 +65,7 @@ from tms_sim.sim.serialization import (
     scenario_from_dict,
 )
 from tms_sim.reporting.comparison import SimulationRunRecord, compare_runs
+from tms_sim.storage.store import ScenarioStore, ScenarioStoreError
 from tms_sim.reporting.export import (
     export_comparison_csv,
     export_comparison_html,
@@ -3766,32 +3767,101 @@ class Workbench(QMainWindow):
         return True
 
     def capture_current_run(self, label: str = "") -> SimulationRunRecord | None:
-        """Capture an immutable record of the current simulation run if completed."""
+        """Capture and persist an immutable record of a completed simulation run."""
         if self.engine is None or not getattr(self.engine, "finished", False):
             return None
 
-        # Guard against duplicate capture of the exact same completed engine state
-        engine_sig = (id(self.engine), round(float(self.engine.time), 3), len(self.engine.events))
-        if getattr(self, "_last_captured_engine_signature", None) == engine_sig and self.captured_runs:
+        # Avoid capturing the same completed engine state more than once.
+        engine_sig = (
+            id(self.engine),
+            round(float(self.engine.time), 3),
+            len(self.engine.events),
+        )
+
+        if (
+            getattr(self, "_last_captured_engine_signature", None) == engine_sig
+            and self.captured_runs
+        ):
             return self.captured_runs[-1]
 
-        self._last_captured_engine_signature = engine_sig
         run_idx = len(self.captured_runs) + 1
-        scen_name = self.scenario_data.get("scenario_id") or (self.scenario_path.stem if self.scenario_path else "Scenario")
+
+        scen_name = (
+            self.scenario_data.get("scenario_id")
+            or (
+                self.scenario_path.stem
+                if self.scenario_path
+                else "Scenario"
+            )
+        )
+
         run_label = label or f"Run {run_idx}: {scen_name}"
         run_id = f"run_{run_idx}_{int(self.engine.time)}_{id(self.engine)}"
+
         record = SimulationRunRecord.from_engine(
             engine=self.engine,
             scenario_name=scen_name,
             label=run_label,
             run_id=run_id,
         )
+
+        # Convert SimulationMetrics into a dictionary for SQLite JSON storage.
+        metrics_data = {
+            field_name: getattr(record.metrics, field_name)
+            for field_name in record.metrics.__dataclass_fields__
+        }
+
+        # Snapshot the scenario used for this simulation.
+        scenario_snapshot = copy.deepcopy(self.scenario_data)
+
+        # Persist the completed run.
+        try:
+            with ScenarioStore() as store:
+                store.save_run(
+                    run_id=record.run_id,
+                    scenario_name=record.scenario_name,
+                    label=record.label,
+                    timestamp=record.timestamp,
+                    seed=None,
+                    scenario_snapshot=scenario_snapshot,
+                    metrics=metrics_data,
+                )
+        except Exception as exc:
+            logging.exception("Could not save completed simulation run")
+
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self,
+                "Run Save Failed",
+                "The completed run was captured in this session, "
+                "but could not be saved to the history database.\n\n"
+                f"Details: {exc}",
+            )
+
+        # Mark the engine state as captured and keep the record in memory.
+        self._last_captured_engine_signature = engine_sig
         self.captured_runs.append(record)
-        if hasattr(self, "comparison_dialog") and self.comparison_dialog is not None and self.comparison_dialog.isVisible():
+
+        # Refresh an open comparison dialog.
+        if (
+            hasattr(self, "comparison_dialog")
+            and self.comparison_dialog is not None
+            and self.comparison_dialog.isVisible()
+        ):
             self.comparison_dialog.refresh_runs()
-        if hasattr(self, "history_dialog") and self.history_dialog is not None and self.history_dialog.isVisible():
+
+        # Refresh an open run-history dialog.
+        if (
+            hasattr(self, "history_dialog")
+            and self.history_dialog is not None
+            and self.history_dialog.isVisible()
+        ):
             self.history_dialog.refresh_history()
+
         return record
+
+
 
     def _auto_capture_completed_run(self):
         """Automatically capture completed simulation run once upon finishing."""
