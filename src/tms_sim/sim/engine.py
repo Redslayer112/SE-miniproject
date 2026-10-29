@@ -45,6 +45,7 @@ class Car:
     x: float  # m, front bumper, from the start of the current segment
     v: float
     entered: float  # simulated time the car entered the network
+    distance_m: float = 0.0
 
 
 class Engine:
@@ -62,6 +63,9 @@ class Engine:
         self.cars: list[Car] = []
         self.exited: list[Car] = []
         self.events: list[tuple] = []  # (time, vehicle id, "spawn" | "exit", segment id)
+        # Canonical metrics event log. Legacy lifecycle events remain in ``events`` for
+        # callers that consume the original four-field tuple format.
+        self.metric_events: list[dict] = []
         self._waiting = list(self.vehicles)
         self._wall = 0.0
 
@@ -93,9 +97,17 @@ class Engine:
         self._spawn()
         blocked = {c.id: self._blocked(c) for c in self.cars}
         acc = {c.id: self._accel(c, blocked[c.id]) for c in self.cars}
+        distance_this_step = 0.0
+        active_vehicle_time = 0.0
         for c in self.cars:
             v = max(0.0, c.v + acc[c.id] * p.dt)
-            c.x += (c.v + v) / 2 * p.dt
+            distance = (c.v + v) / 2 * p.dt
+            if c.leg + 1 == len(c.route):
+                distance = min(distance, max(0.0, self.segs[c.route[c.leg]].length - c.x))
+            c.x += distance
+            c.distance_m += distance
+            distance_this_step += distance
+            active_vehicle_time += p.dt
             c.v = v
         for c in list(self.cars):
             length = self.segs[c.route[c.leg]].length
@@ -107,12 +119,29 @@ class Engine:
                 if c.leg + 1 == len(c.route):
                     self.cars.remove(c)
                     self.exited.append(c)
-                    self.events.append((self.time + p.dt, c.id, "exit", c.route[c.leg]))
+                    exit_time = self.time + p.dt
+                    self.events.append((exit_time, c.id, "exit", c.route[c.leg]))
+                    self.metric_events.append({
+                        "type": "exit", "time": exit_time, "vehicle_id": c.id,
+                        "segment_id": c.route[c.leg], "distance_m": c.distance_m,
+                        "free_flow_time_s": self._free_flow_time(c.route),
+                    })
                     break
                 c.x -= length
                 c.leg += 1
                 length = self.segs[c.route[c.leg]].length
         self.time += p.dt
+        queues: dict[str, int] = {}
+        for c in self.cars:
+            if c.v < 0.5:
+                segment_id = c.route[c.leg]
+                queues[segment_id] = queues.get(segment_id, 0) + 1
+        self.metric_events.append({
+            "type": "sample", "time": self.time, "dt": p.dt,
+            "speed_distance_m": distance_this_step,
+            "active_vehicle_time_s": active_vehicle_time,
+            "queue_by_approach": queues,
+        })
         if self.time >= self.duration:
             self.finished, self.running = True, False
             if self.on_finish:
@@ -130,6 +159,18 @@ class Engine:
             self._waiting.pop(0)
             self.cars.append(Car(veh.id, route, 0, p.length, v0, self.time))
             self.events.append((self.time, veh.id, "spawn", route[0]))
+            self.metric_events.append({
+                "type": "spawn", "time": self.time, "vehicle_id": veh.id,
+                "segment_id": route[0],
+                "free_flow_time_s": self._free_flow_time(route),
+            })
+
+    def _free_flow_time(self, route: list[str]) -> float:
+        """Free-flow time for the route distance from the spawn point to its exit."""
+        return max(0.0, sum(
+            (self.segs[segment_id].length / self.segs[segment_id].speed_limit)
+            for segment_id in route
+        ) - self.p.length / self.segs[route[0]].speed_limit)
 
     # ---- model ----
     def _blocked(self, c: Car) -> bool:

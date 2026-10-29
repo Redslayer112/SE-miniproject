@@ -39,3 +39,14 @@ In particular:
 The full automated test suite passed at the recorded commit.
 Re-run the suite after subsequent changes and update this record with
 the new commit and actual result.
+
+## Issue #10 verification (2026-10-29)
+
+- **Branch:** `fix/issue-10-metrics-reporting`
+- **Base commit:** `7b41185` (changes were verified in the working tree before commit)
+- **Targeted command:** `python -m pytest -q tests/test_engine.py tests/test_metrics.py tests/test_store.py tests/test_scenario_comparison.py tests/test_reporting_export.py tests/test_ui_results_dashboard.py tests/test_ui_run_history.py`
+- **Targeted result:** 103 passed (repeat run exited 0; one prior repeat had an abnormal interpreter shutdown after reporting all tests passed).
+- **Full-suite command:** `python -m pytest -q`
+- **Full-suite result:** 402 passed.
+- **Static checks:** `python -m compileall -q src tests` passed; `git diff --check` passed.
+- Criterion-by-criterion evidence and metric semantics: `docs/issue10_acceptance.md`.

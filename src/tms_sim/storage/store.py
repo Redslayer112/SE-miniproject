@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS runs (
     timestamp TEXT NOT NULL,
     seed INTEGER,
     scenario_snapshot TEXT NOT NULL,
-    metrics TEXT NOT NULL
+    metrics TEXT NOT NULL,
+    run_config TEXT NOT NULL DEFAULT '{}'
 );
 """
 
@@ -69,6 +70,9 @@ class ScenarioStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
         self._db.executescript(_SCHEMA)
+        columns = {row[1] for row in self._db.execute("PRAGMA table_info(runs)")}
+        if "run_config" not in columns:
+            self._db.execute("ALTER TABLE runs ADD COLUMN run_config TEXT NOT NULL DEFAULT '{}' ")
 
     def close(self) -> None:
         self._db.close()
@@ -134,13 +138,30 @@ class ScenarioStore:
 
     # ---- completed runs (contract for #10) ----
     def save_run(self, run_id: str, scenario_name: str, label: str, timestamp: str, seed: int | None,
-                 scenario_snapshot: dict, metrics: dict) -> None:
-        with self._db:
-            self._db.execute(
-                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_id, scenario_name, label, timestamp, seed,
-                 json.dumps(scenario_snapshot, sort_keys=True), json.dumps(metrics, sort_keys=True)),
+                 scenario_snapshot: dict, metrics: dict, run_config: dict | None = None) -> None:
+        if not all(isinstance(value, str) and value.strip() for value in (run_id, scenario_name, label, timestamp)):
+            raise ScenarioStoreError("Run ID, scenario name, label, and timestamp must be non-empty strings.")
+        if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
+            raise ScenarioStoreError("Run seed must be an integer or null.")
+        if not isinstance(scenario_snapshot, dict) or not isinstance(metrics, dict):
+            raise ScenarioStoreError("Run scenario snapshot and metrics must be JSON objects.")
+        if run_config is None:
+            run_config = {}
+        if not isinstance(run_config, dict):
+            raise ScenarioStoreError("Run configuration must be a JSON object.")
+        try:
+            values = (
+                json.dumps(scenario_snapshot, sort_keys=True, allow_nan=False),
+                json.dumps(metrics, sort_keys=True, allow_nan=False),
+                json.dumps(run_config, sort_keys=True, allow_nan=False),
             )
+            with self._db:
+                self._db.execute(
+                    "INSERT INTO runs (run_id, scenario_name, label, timestamp, seed, scenario_snapshot, metrics, run_config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_id, scenario_name, label, timestamp, seed, *values),
+                )
+        except (TypeError, ValueError, sqlite3.Error) as exc:
+            raise ScenarioStoreError(f"Could not save run '{run_id}': {exc}") from exc
 
     def list_runs(self, scenario_name: str | None = None) -> list[dict]:
         sql = "SELECT run_id, scenario_name, label, timestamp, seed FROM runs"
@@ -149,12 +170,22 @@ class ScenarioStore:
         return [dict(zip(("run_id", "scenario_name", "label", "timestamp", "seed"), r)) for r in rows]
 
     def load_run(self, run_id: str) -> dict:
-        row = self._db.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        try:
+            row = self._db.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        except sqlite3.Error as exc:
+            raise ScenarioStoreError(f"Could not read run '{run_id}': {exc}") from exc
         if row is None:
             raise ScenarioStoreError(f"No run '{run_id}' in the library.")
-        keys = ("run_id", "scenario_name", "label", "timestamp", "seed", "scenario_snapshot", "metrics")
+        keys = ("run_id", "scenario_name", "label", "timestamp", "seed", "scenario_snapshot", "metrics", "run_config")
         run = dict(zip(keys, row))
-        run["scenario_snapshot"], run["metrics"] = json.loads(run["scenario_snapshot"]), json.loads(run["metrics"])
+        try:
+            run["scenario_snapshot"] = json.loads(run["scenario_snapshot"])
+            run["metrics"] = json.loads(run["metrics"])
+            run["run_config"] = json.loads(run["run_config"])
+            if not all(isinstance(run[key], dict) for key in ("scenario_snapshot", "metrics", "run_config")):
+                raise ValueError("stored fields must be JSON objects")
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ScenarioStoreError(f"Stored run '{run_id}' is unreadable: {exc}") from exc
         return run
 
     # SAD §4.3 names

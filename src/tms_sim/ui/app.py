@@ -1895,7 +1895,7 @@ class Workbench(QMainWindow):
         # 6. Throughput (Not available)
         self.throughput_label = QLabel("Not available")
         self.throughput_label.setStyleSheet("color: #94a3b8; font-size: 8.5pt; font-weight: 600;")
-        grid.addWidget(self._create_metric_card("THROUGHPUT", self.throughput_label, "not modeled"), 2, 1)
+        grid.addWidget(self._create_metric_card("THROUGHPUT", self.throughput_label, "completed trips per hour"), 2, 1)
 
         rl.addLayout(grid)
 
@@ -1908,14 +1908,17 @@ class Workbench(QMainWindow):
         aux_layout.setContentsMargins(6, 4, 6, 4)
         aux_layout.setSpacing(2)
 
-        self.queue_metric_label = QLabel("Queue length: Not available")
+        self.queue_metric_label = QLabel("Average queue by approach: Not available")
         self.queue_metric_label.setStyleSheet("color: #94a3b8; font-size: 8pt;")
-        self.queue_metric_label.setToolTip("Queue length tracking is not modeled in the current simulation engine.")
-        self.delay_metric_label = QLabel("Average delay: Not available")
+        self.queue_metric_label.setToolTip("Time-average vehicles queued below 0.5 m/s for each road approach.")
+        self.delay_metric_label = QLabel("Average delay: Not available; maximum delay: Not available")
         self.delay_metric_label.setStyleSheet("color: #94a3b8; font-size: 8pt;")
-        self.delay_metric_label.setToolTip("Average delay calculation is not modeled in the current simulation engine.")
+        self.delay_metric_label.setToolTip("Completed-trip delay is travel time minus free-flow time, clamped at zero.")
+        self.average_speed_label = QLabel("Average speed: Not available")
+        self.average_speed_label.setStyleSheet("color: #94a3b8; font-size: 8pt;")
         aux_layout.addWidget(self.queue_metric_label)
         aux_layout.addWidget(self.delay_metric_label)
+        aux_layout.addWidget(self.average_speed_label)
         rl.addWidget(aux_frame)
 
         # Backwards compatibility attributes
@@ -3328,7 +3331,13 @@ class Workbench(QMainWindow):
             if hasattr(self, "mean_travel_time_label"):
                 self.mean_travel_time_label.setText("N/A")
             if hasattr(self, "queue_metric_label"):
-                self.queue_metric_label.setText("Queue length: Not available")
+                self.queue_metric_label.setText("Average queue by approach: Not available")
+            if hasattr(self, "delay_metric_label"):
+                self.delay_metric_label.setText("Average delay: Not available; maximum delay: Not available")
+            if hasattr(self, "average_speed_label"):
+                self.average_speed_label.setText("Average speed: Not available")
+            if hasattr(self, "throughput_label"):
+                self.throughput_label.setText("Not available")
             if hasattr(self, "history_tracker"):
                 self.history_tracker.reset()
             if hasattr(self, "timeline_widget"):
@@ -3376,13 +3385,22 @@ class Workbench(QMainWindow):
             else:
                 self.mean_travel_time_label.setText("N/A")
 
-        if hasattr(self, "queue_metric_label"):
-            if m.simulated_time == 0.0 and not self.engine.running:
-                self.queue_metric_label.setText("Queue length: Not available")
-            else:
-                total_queued = sum(1 for c in self.engine.cars if c.v < RoadCanvas.QUEUE_SPEED_THRESHOLD)
-                self.queue_metric_label.setText(f"Active queue: {total_queued} veh")
-                self.queue_metric_label.setToolTip(f"Total stopped or queued vehicles in network (speed < {RoadCanvas.QUEUE_SPEED_THRESHOLD} m/s).")
+        self.throughput_label.setText(
+            f"{m.throughput_vph:.1f} veh/h" if m.throughput_vph is not None else "Not available"
+        )
+        queues = m.average_queue_length_by_approach
+        self.queue_metric_label.setText(
+            "Average queue by approach: " + (
+                ", ".join(f"{approach} {value:.1f} veh" for approach, value in sorted(queues.items()))
+                if queues else "Not available"
+            )
+        )
+        avg_delay = f"{m.average_delay_s:.1f} s" if m.average_delay_s is not None else "Not available"
+        max_delay = f"{m.maximum_delay_s:.1f} s" if m.maximum_delay_s is not None else "Not available"
+        self.delay_metric_label.setText(f"Average delay: {avg_delay}; maximum delay: {max_delay}")
+        self.average_speed_label.setText(
+            f"Average speed: {m.average_speed_mps:.1f} m/s" if m.average_speed_mps is not None else "Average speed: Not available"
+        )
 
         network = self.scenario_data.get("network", {})
         intersections = network.get("intersections", [])
@@ -3803,6 +3821,12 @@ class Workbench(QMainWindow):
             scenario_name=scen_name,
             label=run_label,
             run_id=run_id,
+            scenario_snapshot=copy.deepcopy(self.scenario_data),
+            seed=self.scenario_data.get("simulation", {}).get("seed"),
+            run_config={
+                **copy.deepcopy(self.scenario_data.get("simulation", {})),
+                "speed_multiplier": self.engine.speed,
+            },
         )
 
         # Convert SimulationMetrics into a dictionary for SQLite JSON storage.
@@ -3816,15 +3840,16 @@ class Workbench(QMainWindow):
 
         # Persist the completed run.
         try:
-            with ScenarioStore() as store:
+            with ScenarioStore(getattr(self, "library_path", None)) as store:
                 store.save_run(
                     run_id=record.run_id,
                     scenario_name=record.scenario_name,
                     label=record.label,
                     timestamp=record.timestamp,
-                    seed=None,
+                    seed=record.seed,
                     scenario_snapshot=scenario_snapshot,
                     metrics=metrics_data,
+                    run_config=record.run_config or {},
                 )
         except Exception as exc:
             logging.exception("Could not save completed simulation run")
@@ -3876,6 +3901,7 @@ class Workbench(QMainWindow):
         self, baseline_run_id: str | None = None, candidate_run_id: str | None = None
     ) -> ScenarioComparisonDialog:
         """Open or bring to focus the scenario comparison dialog."""
+        self.load_persisted_runs()
         if not hasattr(self, "comparison_dialog") or self.comparison_dialog is None:
             self.comparison_dialog = ScenarioComparisonDialog(self)
         else:
@@ -3891,6 +3917,7 @@ class Workbench(QMainWindow):
 
     def open_run_history_dialog(self) -> SimulationRunHistoryDialog:
         """Open or bring to focus the simulation run history dialog."""
+        self.load_persisted_runs()
         if not hasattr(self, "history_dialog") or self.history_dialog is None:
             self.history_dialog = SimulationRunHistoryDialog(self)
         else:
@@ -3899,6 +3926,32 @@ class Workbench(QMainWindow):
         self.history_dialog.raise_()
         self.history_dialog.activateWindow()
         return self.history_dialog
+
+    def load_persisted_runs(self) -> list[SimulationRunRecord]:
+        """Merge saved run records into this session for history and comparison."""
+        try:
+            with ScenarioStore(getattr(self, "library_path", None)) as store:
+                rows = store.list_runs()
+                saved = []
+                unreadable = []
+                for row in rows:
+                    try:
+                        saved.append(SimulationRunRecord.from_stored(store.load_run(row["run_id"])))
+                    except (ScenarioStoreError, KeyError, TypeError, ValueError) as exc:
+                        unreadable.append(f"{row.get('run_id', '<unknown>')}: {exc}")
+            if unreadable:
+                QMessageBox.warning(
+                    self, "Some Saved Runs Could Not Be Loaded",
+                    "Unreadable run records were skipped:\n" + "\n".join(unreadable),
+                )
+        except Exception as exc:
+            logging.exception("Could not load saved simulation runs")
+            QMessageBox.warning(self, "Run History Unavailable", f"Could not load saved runs:\n{exc}")
+            return list(self.captured_runs)
+        by_id = {record.run_id: record for record in saved}
+        by_id.update({record.run_id: record for record in self.captured_runs})
+        self.captured_runs = sorted(by_id.values(), key=lambda record: record.timestamp)
+        return list(self.captured_runs)
 
     def get_exportable_run(self) -> SimulationRunRecord | None:
         """Return the current completed run record or latest captured run."""

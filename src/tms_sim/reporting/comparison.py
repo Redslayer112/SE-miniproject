@@ -44,6 +44,9 @@ class SimulationRunRecord:
     scenario_name: str
     metrics: SimulationMetrics
     timestamp: str = ""
+    scenario_snapshot: dict | None = None
+    seed: int | None = None
+    run_config: dict | None = None
 
     @classmethod
     def from_engine(
@@ -53,6 +56,9 @@ class SimulationRunRecord:
         label: str = "",
         run_id: str = "",
         timestamp: str = "",
+        scenario_snapshot: dict | None = None,
+        seed: int | None = None,
+        run_config: dict | None = None,
     ) -> SimulationRunRecord:
         """Construct a validated record from a completed engine.
 
@@ -79,6 +85,50 @@ class SimulationRunRecord:
             scenario_name=scen_name,
             metrics=metrics,
             timestamp=timestamp,
+            scenario_snapshot=scenario_snapshot,
+            seed=seed,
+            run_config=run_config,
+        )
+
+    @classmethod
+    def from_stored(cls, stored: dict) -> "SimulationRunRecord":
+        """Rebuild a comparison record from a validated ScenarioStore row."""
+        known = SimulationMetrics.__dataclass_fields__
+        raw = stored.get("metrics")
+        if not isinstance(raw, dict):
+            raise ValueError("Stored run metrics must be an object.")
+        required = {"status", "simulated_time", "duration", "vehicles_generated", "total_scheduled",
+                    "vehicles_entered", "vehicles_completed", "vehicles_in_network", "mean_travel_time"}
+        missing = required - raw.keys()
+        if missing:
+            raise ValueError(f"Stored run is missing metrics: {', '.join(sorted(missing))}.")
+        if not isinstance(raw["status"], str):
+            raise ValueError("Stored run status must be text.")
+        for key in ("vehicles_generated", "total_scheduled", "vehicles_entered", "vehicles_completed", "vehicles_in_network"):
+            value = raw[key]
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"Stored metric '{key}' must be a non-negative integer.")
+        for key in ("simulated_time", "duration", "mean_travel_time", "average_speed_mps",
+                    "throughput_vph", "average_delay_s", "maximum_delay_s", "queue_length_veh"):
+            value = raw.get(key)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise ValueError(f"Stored metric '{key}' must be a finite number or null.")
+        queues = raw.get("average_queue_length_by_approach", {})
+        if not isinstance(queues, dict) or any(
+            not isinstance(name, str) or isinstance(value, bool)
+            or not isinstance(value, (int, float)) or not math.isfinite(value)
+            for name, value in queues.items()
+        ):
+            raise ValueError("Stored per-approach queue metrics are malformed.")
+        metrics = SimulationMetrics(**{key: value for key, value in raw.items() if key in known})
+        if not isinstance(stored.get("scenario_snapshot"), dict) or not isinstance(stored.get("run_config", {}), dict):
+            raise ValueError("Stored scenario snapshot or run configuration is malformed.")
+        return cls(
+            run_id=stored["run_id"], label=stored["label"],
+            scenario_name=stored["scenario_name"], metrics=metrics,
+            timestamp=stored.get("timestamp", ""),
+            scenario_snapshot=stored.get("scenario_snapshot"),
+            seed=stored.get("seed"), run_config=stored.get("run_config"),
         )
 
 
@@ -304,50 +354,57 @@ def compare_runs(
             direction=MetricDirection.HIGHER_IS_BETTER,
             note="Mean instantaneous speed of active vehicles",
         ),
-
-        # Metrics not currently modeled by the simulation engine.
-        MetricComparison(
-            key="throughput_vph",
-            name="Hourly Throughput",
-            unit="veh/h",
-            baseline_value=None,
-            candidate_value=None,
-            absolute_change=None,
-            percent_change=None,
-            direction=MetricDirection.HIGHER_IS_BETTER,
-            status=ComparisonStatus.UNAVAILABLE,
-            note="Not modeled in current simulation engine",
-        ),
-        MetricComparison(
-            key="queue_length_veh",
-            name="Average Queue Length",
-            unit="veh",
-            baseline_value=None,
-            candidate_value=None,
-            absolute_change=None,
-            percent_change=None,
-            direction=MetricDirection.LOWER_IS_BETTER,
-            status=ComparisonStatus.UNAVAILABLE,
-            note="Not modeled in current simulation engine",
-        ),
-        MetricComparison(
-            key="average_delay_s",
-            name="Average Vehicle Delay",
-            unit="s",
-            baseline_value=None,
-            candidate_value=None,
-            absolute_change=None,
-            percent_change=None,
-            direction=MetricDirection.LOWER_IS_BETTER,
-            status=ComparisonStatus.UNAVAILABLE,
-            note="Not modeled in current simulation engine",
-        ),
     ]
+
+    for key, name, unit, direction, note in (
+        ("throughput_vph", "Hourly Throughput", "veh/h", MetricDirection.HIGHER_IS_BETTER, "Completed trips per simulated hour"),
+        ("average_delay_s", "Average Vehicle Delay", "s", MetricDirection.LOWER_IS_BETTER, "Mean completed-trip delay from free-flow time"),
+        ("maximum_delay_s", "Maximum Vehicle Delay", "s", MetricDirection.LOWER_IS_BETTER, "Maximum completed-trip delay from free-flow time"),
+        ("queue_length_veh", "Average Queue Length", "veh", MetricDirection.LOWER_IS_BETTER, "Network-wide time-average queue count"),
+    ):
+        metrics.append(calculate_metric_comparison(
+            key, name, unit, getattr(baseline_metrics, key),
+            getattr(candidate_metrics, key), direction, note,
+        ))
+
+    approaches = sorted(set(baseline_metrics.average_queue_length_by_approach) |
+                       set(candidate_metrics.average_queue_length_by_approach))
+    for approach in approaches:
+        metrics.append(calculate_metric_comparison(
+            key=f"queue:{approach}", name=f"Average Queue — {approach}", unit="veh",
+            baseline_val=baseline_metrics.average_queue_length_by_approach.get(approach),
+            candidate_val=candidate_metrics.average_queue_length_by_approach.get(approach),
+            direction=MetricDirection.LOWER_IS_BETTER,
+            note=f"Time-average queue count on approach {approach}",
+        ))
+
+    incomplete = baseline_metrics.status != "Completed" or candidate_metrics.status != "Completed"
+    different_scenarios = baseline.scenario_name != candidate.scenario_name
+    warnings = []
+    if not duration_compatible:
+        warnings.append(
+            f"Configured durations differ (Baseline: {duration_baseline:.1f}s vs Candidate: {duration_candidate:.1f}s). Cumulative count and throughput comparisons may be biased."
+        )
+    if different_scenarios:
+        warnings.append("Scenario names differ; treat differences as cross-scenario results.")
+    if (baseline.scenario_snapshot is not None and candidate.scenario_snapshot is not None
+            and baseline.scenario_snapshot != candidate.scenario_snapshot):
+        warnings.append("Scenario configurations differ; interpret metric changes with the configuration snapshots.")
+    if (baseline.run_config is not None and candidate.run_config is not None
+            and baseline.run_config != candidate.run_config):
+        warnings.append("Run configurations differ; interpret metric changes with the saved run settings.")
+    if incomplete:
+        warnings.append("At least one run is incomplete; metric differences are provisional.")
+        metrics = [
+            MetricComparison(**{**metric.__dict__, "status": ComparisonStatus.INCOMPATIBLE,
+                                "note": metric.note + "; incomplete run"})
+            for metric in metrics
+        ]
 
     return ScenarioComparison(
         baseline=baseline,
         candidate=candidate,
         metrics=metrics,
         duration_compatible=duration_compatible,
-        warning=warning,
+        warning=" ".join(warnings) or warning,
     )

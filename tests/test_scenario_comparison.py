@@ -20,6 +20,8 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import asdict
+import json
 from typing import Any, cast
 
 import pytest
@@ -35,6 +37,7 @@ from tms_sim.reporting.comparison import (
 from tms_sim.reporting.metrics import SimulationMetrics
 from tms_sim.ui.app import Workbench
 from tms_sim.ui.comparison import ScenarioComparisonDialog
+from tms_sim.storage.store import ScenarioStore
 
 
 SAMPLE_SCENARIO_PATH = (
@@ -143,6 +146,49 @@ def test_metric_comparison_absolute_and_percentage_differences():
     assert completed_metric.absolute_change == 5.0
     assert completed_metric.percent_change == 25.0
     assert completed_metric.status == ComparisonStatus.IMPROVED
+
+
+def test_run_comparison_includes_issue10_metrics_and_flags_scenario_mismatch():
+    baseline_metrics = _make_dummy_metrics(average_speed=5.0)
+    baseline_metrics = SimulationMetrics(**{
+        **baseline_metrics.__dict__, "throughput_vph": 10.0,
+        "average_delay_s": 2.0, "maximum_delay_s": 4.0,
+        "queue_length_veh": 1.0,
+        "average_queue_length_by_approach": {"A": 1.0},
+    })
+    candidate_metrics = SimulationMetrics(**{
+        **baseline_metrics.__dict__, "throughput_vph": 12.0,
+        "average_delay_s": 1.0, "maximum_delay_s": 2.0,
+        "queue_length_veh": 0.5,
+        "average_queue_length_by_approach": {"A": 0.5},
+    })
+    comparison = compare_runs(
+        SimulationRunRecord("a", "A", "Scenario A", baseline_metrics),
+        SimulationRunRecord("b", "B", "Scenario B", candidate_metrics),
+    )
+    assert comparison.warning and "Scenario names differ" in comparison.warning
+    assert comparison.get_metric("throughput_vph").absolute_change == 2.0
+    assert comparison.get_metric("average_delay_s").status == ComparisonStatus.IMPROVED
+    assert comparison.get_metric("maximum_delay_s").absolute_change == -2.0
+    assert comparison.get_metric("queue:A").absolute_change == -0.5
+
+
+def test_comparison_dialog_loads_two_persisted_runs(workbench, tmp_path):
+    workbench.library_path = tmp_path / "runs.sqlite3"
+    metrics_a = _make_dummy_metrics(average_speed=5.0)
+    metrics_b = _make_dummy_metrics(average_speed=6.0)
+    snapshot = json.loads(SAMPLE_SCENARIO_PATH.read_text(encoding="utf-8"))
+    with ScenarioStore(workbench.library_path) as store:
+        for run_id, label, metrics in (("saved-a", "Saved A", metrics_a), ("saved-b", "Saved B", metrics_b)):
+            store.save_run(run_id, "Stored Scenario", label, "2026-10-29T10:00:00", 42,
+                           snapshot, asdict(metrics), {"duration_s": 600.0, "time_step_s": 0.5})
+    workbench.captured_runs = []
+    dialog = workbench.open_comparison_dialog("saved-a", "saved-b")
+    assert dialog.combo_baseline.count() == 2
+    assert dialog.combo_candidate.count() == 2
+    assert dialog.current_comparison.baseline.run_id == "saved-a"
+    assert dialog.current_comparison.candidate.run_id == "saved-b"
+    assert dialog.current_comparison.get_metric("average_speed_mps").absolute_change == 1.0
 
 
 def test_zero_baseline_percentage_handling():
@@ -261,7 +307,7 @@ def test_duration_incompatibility_warning():
     same_duration = SimulationRunRecord(
         "2",
         "Run 2",
-        "Scenario B",
+        "Scenario A",
         _make_dummy_metrics(duration=600.0),
     )
     different_duration = SimulationRunRecord(
@@ -296,6 +342,20 @@ def test_incomplete_run_rejection():
 
     with pytest.raises(ValueError, match="incomplete"):
         SimulationRunRecord.from_engine(cast(Any, FakeEngine()))
+
+
+def test_comparison_marks_incomplete_snapshots_as_incompatible():
+    incomplete = SimulationRunRecord(
+        "partial", "Partial", "Scenario",
+        _make_dummy_metrics(status="Running"),
+    )
+    complete = SimulationRunRecord(
+        "complete", "Complete", "Scenario",
+        _make_dummy_metrics(status="Completed"),
+    )
+    comparison = compare_runs(incomplete, complete)
+    assert "incomplete" in comparison.warning
+    assert all(item.status == ComparisonStatus.INCOMPATIBLE for item in comparison.metrics)
 
 
 def test_independent_immutable_snapshots(workbench):

@@ -1,11 +1,7 @@
-"""Simulation run metrics computation (SAD §3.4, TMS-F-050, TMS-F-051).
-
-This module provides authoritative recomputation of simulation metrics directly
-from the simulation engine state and event log.
-"""
+"""Run metrics recomputed from the engine's lifecycle and measurement event logs."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,7 +10,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SimulationMetrics:
-    """Snapshot of simulation metrics at a point in time or at completion."""
+    """A metrics snapshot; unavailable values are ``None``, never fabricated zeroes."""
 
     status: str
     simulated_time: float
@@ -25,114 +21,114 @@ class SimulationMetrics:
     vehicles_completed: int
     vehicles_in_network: int
     mean_travel_time: float | None
-
-    # Mean instantaneous speed of active vehicles, in metres per second.
     average_speed_mps: float | None = None
-
-    # Metrics not yet fully modeled by the current backend.
     throughput_vph: float | None = None
     average_delay_s: float | None = None
+    maximum_delay_s: float | None = None
     queue_length_veh: float | None = None
+    average_queue_length_by_approach: dict[str, float] = field(default_factory=dict)
 
 
 def compute_metrics(engine: Engine | None) -> SimulationMetrics:
-    """Compute authoritative metrics from engine state and event log.
+    """Recompute metrics from immutable lifecycle events and per-step measurements.
 
-    Semantics:
-    - Status is Completed, Running, Paused, or Ready.
-    - Vehicles generated counts demand with departure time <= current time.
-    - Vehicles entered counts unique vehicle IDs with spawn events.
-    - Vehicles completed counts unique vehicle IDs with exit events.
-    - Vehicles in network counts currently active cars.
-    - Mean travel time averages completed trips only.
-    - Average speed averages instantaneous speeds of currently active cars.
-      It is None when no vehicles are active.
-    - Throughput, delay, and queue length remain unavailable until modeled.
+    Travel time and delay include completed trips only. Delay is completed-trip time
+    minus free-flow time for the same route (clamped at zero). Throughput is completed
+    trips divided by elapsed simulated time, expressed per hour. Queue is the time
+    average count of vehicles below 0.5 m/s, grouped by their current approach segment.
+    Average speed is distance divided by vehicle-time across all simulated steps, so
+    stopped vehicles contribute zero speed. Display/export rounds to one decimal; the
+    stored values retain full floating-point precision. A quantity without a valid
+    denominator or observation is unavailable (``None``); an observed zero is 0.
     """
     if engine is None:
-        return SimulationMetrics(
-            status="Ready",
-            simulated_time=0.0,
-            duration=0.0,
-            vehicles_generated=0,
-            total_scheduled=0,
-            vehicles_entered=0,
-            vehicles_completed=0,
-            vehicles_in_network=0,
-            mean_travel_time=None,
-            average_speed_mps=None,
-        )
+        return SimulationMetrics("Ready", 0.0, 0.0, 0, 0, 0, 0, 0, None)
 
-    # Determine simulation status.
-    if engine.finished:
-        status = "Completed"
-    elif engine.running:
-        status = "Running"
-    elif engine.time > 0.0:
-        status = "Paused"
-    else:
-        status = "Ready"
-
+    status = "Completed" if engine.finished else (
+        "Running" if engine.running else "Paused" if engine.time > 0 else "Ready"
+    )
     total_scheduled = len(engine.vehicles)
+    generated = total_scheduled if engine.finished else sum(
+        vehicle.depart_time <= engine.time for vehicle in engine.vehicles
+    )
 
-    if engine.finished:
-        vehicles_generated = total_scheduled
+    # The canonical log records spawn, exit, and step measurement events. Older or
+    # test-double engines fall back to their lifecycle tuple events.
+    log = getattr(engine, "metric_events", None)
+    spawns: dict[int, tuple[float, float | None]] = {}
+    exits: dict[int, tuple[float, float | None]] = {}
+    samples: list[dict] = []
+    if log is not None:
+        for event in log:
+            kind = event.get("type")
+            vehicle_id = event.get("vehicle_id")
+            if kind == "spawn" and vehicle_id not in spawns:
+                spawns[vehicle_id] = (float(event["time"]), event.get("free_flow_time_s"))
+            elif kind == "exit" and vehicle_id not in exits:
+                exits[vehicle_id] = (float(event["time"]), event.get("free_flow_time_s"))
+            elif kind == "sample":
+                samples.append(event)
     else:
-        vehicles_generated = sum(
-            1 for vehicle in engine.vehicles
-            if vehicle.depart_time <= engine.time
-        )
+        for event in engine.events:
+            t, vehicle_id, kind = event[:3]
+            if kind == "spawn" and vehicle_id not in spawns:
+                spawns[vehicle_id] = (float(t), None)
+            elif kind == "exit" and vehicle_id not in exits:
+                exits[vehicle_id] = (float(t), None)
 
-    # Recompute counts and trip durations from the event log.
-    spawns: dict[int, float] = {}
-    exited_ids: set[int] = set()
-
-    for event in engine.events:
-        # Event format: (time, vehicle_id, "spawn" | "exit", segment_id)
-        event_time, vehicle_id, event_type = (
-            event[0],
-            event[1],
-            event[2],
-        )
-
-        if event_type == "spawn":
-            if vehicle_id not in spawns:
-                spawns[vehicle_id] = event_time
-        elif event_type == "exit":
-            exited_ids.add(vehicle_id)
-
-    travel_times = [
-        event[0] - spawns[event[1]]
-        for event in engine.events
-        if event[2] == "exit" and event[1] in spawns
+    completed_ids = set(spawns).intersection(exits)
+    trip_times = [exits[i][0] - spawns[i][0] for i in completed_ids]
+    delays = [
+        max(0.0, exits[i][0] - spawns[i][0] - float(spawns[i][1]))
+        for i in completed_ids if spawns[i][1] is not None
     ]
-
-    vehicles_entered = len(spawns)
-    vehicles_completed = len(exited_ids)
-    vehicles_in_network = len(engine.cars)
-
-    mean_travel_time = (
-        sum(travel_times) / len(travel_times)
-        if travel_times
-        else None
+    mean_travel = sum(trip_times) / len(trip_times) if trip_times else None
+    mean_delay = sum(delays) / len(delays) if delays else None
+    max_delay = max(delays) if delays else None
+    throughput = (
+        len(completed_ids) * 3600.0 / engine.time if engine.time > 0 else None
     )
 
-    # Average instantaneous speed of active vehicles, in m/s.
-    average_speed_mps = (
-        sum(car.v for car in engine.cars) / len(engine.cars)
-        if engine.cars
-        else None
+    speed_distance = sum(float(sample.get("speed_distance_m", 0.0)) for sample in samples)
+    vehicle_time = sum(float(sample.get("active_vehicle_time_s", 0.0)) for sample in samples)
+    if samples:
+        average_speed = speed_distance / vehicle_time if vehicle_time > 0 else None
+    else:
+        cars = getattr(engine, "cars", [])
+        average_speed = sum(car.v for car in cars) / len(cars) if cars else None
+
+    approach_ids = set(getattr(engine, "segs", {}))
+    for sample in samples:
+        approach_ids.update(sample.get("queue_by_approach", {}))
+    queue_integrals = {approach: 0.0 for approach in approach_ids}
+    queue_total = 0.0
+    for sample in samples:
+        dt = float(sample.get("dt", 0.0))
+        queues = sample.get("queue_by_approach", {})
+        for approach in approach_ids:
+            count = float(queues.get(approach, 0))
+            queue_integrals[approach] += count * dt
+            queue_total += count * dt
+    average_by_approach = (
+        {key: value / engine.time for key, value in sorted(queue_integrals.items())}
+        if engine.time > 0 and samples else {}
     )
+    average_queue = queue_total / engine.time if engine.time > 0 and samples else None
 
     return SimulationMetrics(
         status=status,
         simulated_time=engine.time,
         duration=engine.duration,
-        vehicles_generated=vehicles_generated,
+        vehicles_generated=generated,
         total_scheduled=total_scheduled,
-        vehicles_entered=vehicles_entered,
-        vehicles_completed=vehicles_completed,
-        vehicles_in_network=vehicles_in_network,
-        mean_travel_time=mean_travel_time,
-        average_speed_mps=average_speed_mps,
+        vehicles_entered=len(spawns),
+        vehicles_completed=len(completed_ids),
+        vehicles_in_network=len(engine.cars),
+        mean_travel_time=mean_travel,
+        average_speed_mps=average_speed,
+        throughput_vph=throughput,
+        average_delay_s=mean_delay,
+        maximum_delay_s=max_delay,
+        queue_length_veh=average_queue,
+        average_queue_length_by_approach=average_by_approach,
     )

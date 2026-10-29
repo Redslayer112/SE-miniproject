@@ -250,8 +250,8 @@ def test_view_details_dialog(workbench):
     )
     details = RunDetailsDialog(run, workbench)
 
-    # Table contains 11 metrics
-    assert details.table.rowCount() == 11
+    # Table contains the full metric summary, including live queue and speed metrics.
+    assert details.table.rowCount() == 13
 
     # Check Completed row
     assert details.table.item(0, 0).text() == "Vehicles Completed"

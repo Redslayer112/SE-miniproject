@@ -51,13 +51,14 @@ The following capabilities are represented in the current repository:
 - **SQLite scenario library:** Saves, lists, loads, duplicates, renames, and deletes named scenarios.
 - **Scenario import and export:** Imports and exports scenarios using versioned JSON with validation.
 - **Run-record persistence:** Saves simulation-run records with a snapshot of the scenario and supports listing and loading saved runs.
+- **Run analysis:** Displays live and final travel, delay, queue, throughput, and speed metrics; saved runs can be compared and exported as CSV or HTML reports.
 - **Scenario library UI:** Opens from **File → Scenario Library** or with **Ctrl+L**.
 - **Automated testing:** Tests network validation, signal plans, demand generation, simulation behaviour, scenarios, storage, and UI workflows.
 - **Continuous integration:** GitHub Actions runs the test suite on pushes to `main` and pull requests.
 
 ### Current UI Limitations
 
-The desktop application provides the `TMS-Sim` workbench and a scenario-library dialog. Further development can improve interactive network editing, full 2D traffic visualization, run comparison, performance metrics, and reporting workflows.
+The desktop application provides the `TMS-Sim` workbench, run history and comparison, summary metrics, CSV/HTML reporting, and a scenario-library dialog. Further development can improve interactive network editing and full 2D traffic visualization.
 
 ## Technology Stack
 
