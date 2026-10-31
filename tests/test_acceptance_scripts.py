@@ -4,7 +4,42 @@ import subprocess
 import sys
 from pathlib import Path
 
+from measure_gui_fps import measurement_failure_reason
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_gui_measurement_detects_engine_pause_before_completion():
+    assert measurement_failure_reason(
+        expected_speed=4.0,
+        actual_speed=4.0,
+        engine_running=False,
+        engine_finished=False,
+        window_minimized=False,
+        seconds_since_last_frame=0.0,
+    ) == "Engine stopped before completion"
+
+
+def test_gui_measurement_does_not_hide_speed_change():
+    assert measurement_failure_reason(
+        expected_speed=4.0,
+        actual_speed=1.0,
+        engine_running=True,
+        engine_finished=False,
+        window_minimized=False,
+        seconds_since_last_frame=0.0,
+    ) == "Playback speed changed from 4x to 1x"
+
+
+def test_gui_measurement_keeps_frame_stall_failure_for_running_engine():
+    assert measurement_failure_reason(
+        expected_speed=4.0,
+        actual_speed=4.0,
+        engine_running=True,
+        engine_finished=False,
+        window_minimized=False,
+        seconds_since_last_frame=31.0,
+    ) == "No canvas frames were rendered for over 30 seconds"
 
 
 def test_load_test_script_creates_report(tmp_path):
