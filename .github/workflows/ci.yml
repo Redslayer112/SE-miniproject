@@ -24,4 +24,11 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Run tests
-        run: python -m pytest
+        shell: pwsh
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          python -m pytest
+          $pytestExitCode = $LASTEXITCODE
+          Write-Host "PYTEST_PROCESS_EXIT_CODE=$pytestExitCode"
+          exit $pytestExitCode
