@@ -39,8 +39,9 @@
 - GUI mean sampled FPS is descriptive only and does not replace the agreed acceptance measurement.
 - Total process RAM: NOT MEASURED
 - TC-DEM-02 deterministic demand, event-log, and recorded-metric comparison: PASS for the fields checked
-- TC-REL-01, TC-UX-01, and TC-PORT-01: NOT YET VERIFIED
-- Full analyst workflow: NOT YET VERIFIED
+- TC-REL-01: **INCOMPLETE / BLOCKED** — one 4x GUI simulated-hour completed (seed 42); two attempts (seeds 43 and 44) ended after mouse input with `Simulation paused`. 4x evidence is diagnostic; three clean GUI runs are not established.
+- TC-UX-01 and TC-PORT-01: **BLOCKED** — no new-user participants or clean Windows 10/11 installations were available.
+- Full analyst workflow: **PASS — automated fixture workflow**; see `artifacts/issue12/system_checks.json`.
 
 
 ## 3. TC-DEM-02 - Deterministic repeatability
@@ -106,12 +107,12 @@ This section supersedes preliminary Issue #12 observations above where they conf
 | Criterion | Status | Verified result |
 |---|---|---|
 | TC-PERF-01 | **INCOMPLETE / BLOCKED** | The latest 1x GUI run stopped at 2,123.6/3,600 simulated seconds. It stopped producing canvas frames and the harness exited 1. The partial interval reports 6.45 FPS but is not a complete-run acceptance value. See `artifacts/issue12/tc_perf_01_full_run_retry1.json`. No further long benchmark was launched. |
-| TC-REL-01 | **INCOMPLETE / BLOCKED** | Three headless one-hour simulations at seeds 42, 43, and 44 completed without exception. The required three completed GUI reliability runs were not obtained. See `artifacts/issue12/system_checks.json`. |
+| TC-REL-01 | **INCOMPLETE / BLOCKED** | Three headless one-hour simulations completed. Of the new 4x GUI attempts, seed 42 completed one hour; seeds 43 and 44 paused after recorded mouse presses. These do not establish three clean interaction-free GUI runs. See `artifacts/issue12/system_checks.json` and `artifacts/issue12/gui_4x_reliability_seed4*.json`. |
 | TC-UX-01 | **BLOCKED** | No new-user participants were tested. Automated fixture workflow is not human usability evidence. |
 | TC-PORT-01 | **BLOCKED** | Clean Windows 10 and Windows 11 installations were unavailable; testing occurred on the existing Windows 11 build 26300 host. |
 | TC-DEM-02 | **PASS** | Two independent seed-42 runs produced identical demand, all 36,940 metric events, and all reported metrics. Required throughput, delay, and queue metrics were non-null. |
 | Analyst workflow | **PASS — automated fixture path** | The Workbench loaded a two-intersection/two-segment scenario; saved/exported/imported/reloaded it; completed and persisted two runs to temporary SQLite; reloaded and compared them; updated results; and exported CSV which parsed as 20 rows. No manual network authoring is claimed. |
 | Focused automated tests | **PASS** | 17 passed in 11.81s; process exit 0. |
-| Full automated suite | **403 assertions passed; process exit abnormal** | Two runs reported 403 passed (57.00s and 57.31s) and then exited `-1073740791` (`0xC0000409`). The test assertions passed, but the process exit was nonzero. |
+| Full automated suite | **406 assertions passed; process exit abnormal** | On the continuation branch, pytest reported 406 passed in 44.57s; Python then emitted a fatal shutdown abort / Windows access violation and exited `-1073741819` (`0xC0000005`). Assertions passed, process exit was nonzero. |
 
-The queue metric definition remains speed **below 0.5 m/s**. Delay remains the completed-trip mean against speed-limit-based free-flow time; incomplete trips are excluded. The benchmark and workflow each used temporary run-history databases; existing user records were not touched. Detailed criteria and risks are recorded in `docs/issue12_acceptance.md` and `artifacts/issue12/defect_log.md`. Issue #12 remains open because TC-PERF-01, TC-REL-01, TC-UX-01, and TC-PORT-01 are unresolved.
+The queue metric definition remains speed **below 0.5 m/s**. Delay remains the completed-trip mean against speed-limit-based free-flow time; incomplete trips are excluded. The benchmark and workflow used temporary run-history databases; existing user records were not touched. Seed-42 4x GUI completed one simulated hour; seeds 43 and 44 paused after recorded mouse presses and are interrupted attempts. 4x is diagnostic and does not satisfy the 1x performance requirement. Detailed evidence and risks are recorded in `docs/issue12_acceptance.md`, `docs/test_execution_record.md`, and `artifacts/issue12/defect_log.md`. Issue #12 remains open because TC-PERF-01, TC-REL-01, TC-UX-01, and TC-PORT-01 are unresolved.

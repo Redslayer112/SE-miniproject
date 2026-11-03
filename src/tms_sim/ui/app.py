@@ -52,7 +52,7 @@ from tms_sim.network import (
 )
 from tms_sim.network.serialization import network_from_dict
 from tms_sim.reporting.history import SimulationHistoryTracker
-from tms_sim.reporting.metrics import compute_metrics
+from tms_sim.reporting.metrics import IncrementalMetricsCalculator
 from tms_sim.signal import SignalPlan, SignalPhase, SignalPlanBlockedError
 from tms_sim.signal.validation import validate_signal_plan
 from tms_sim.signal.serialization import plan_from_dict, plan_to_dict
@@ -280,6 +280,57 @@ class RoadCanvas(QWidget):
             "length_m": round(q_len, 1),
             "vehicle_ids": [c.id for c in queued],
         }
+
+    def _build_queue_states(self) -> dict:
+        """Calculate queue states for all segments in a single vehicle pass."""
+        queue_states = {}
+
+        if self.engine is None:
+            return queue_states
+
+        segments = self.scenario_data.get("network", {}).get("segments", [])
+
+        # Preserve the first matching segment, as get_queue_state() does.
+        segment_by_id = {}
+        for segment in segments:
+            segment_by_id.setdefault(segment.get("id"), segment)
+
+        queued_by_segment = {}
+
+        # Scan active vehicles only once for all approach queues.
+        for car in (getattr(self.engine, "cars", None) or []):
+            if (
+                car.route
+                and car.leg < len(car.route)
+                and car.v < self.QUEUE_SPEED_THRESHOLD
+            ):
+                segment_id = car.route[car.leg]
+                if segment_id in segment_by_id:
+                    queued_by_segment.setdefault(segment_id, []).append(car)
+
+        vehicle_length = getattr(
+            getattr(self.engine, "p", None),
+            "length",
+            5.0,
+        )
+
+        # Calculate queue measurements only for segments with queued vehicles.
+        for segment_id, queued in queued_by_segment.items():
+            segment = segment_by_id[segment_id]
+            segment_length = float(segment.get("length_m", 1.0))
+            tail_x = min(car.x for car in queued)
+            queue_length = max(
+                0.0,
+                segment_length - tail_x + vehicle_length,
+            )
+
+            queue_states[segment_id] = {
+                "count": len(queued),
+                "length_m": round(queue_length, 1),
+                "vehicle_ids": [car.id for car in queued],
+            }
+
+        return queue_states
 
     def reset_rendering_performance_metrics(self) -> None:
         """Start a fresh rendering measurement interval."""
@@ -730,6 +781,19 @@ class RoadCanvas(QWidget):
         intersections = network.get("intersections", [])
         segments = network.get("segments", [])
         turning_movements = network.get("turning_movements", [])
+
+        # Index movements by intersection and incoming segment so each road
+        # approach does not rescan the complete movement list while painting.
+        movements_by_approach = {}
+        for movement in turning_movements:
+            key = (
+                movement.get("intersection"),
+                movement.get("from_segment"),
+            )
+            movement_id = movement.get("id")
+            if movement_id is not None:
+                movements_by_approach.setdefault(key, []).append(movement_id)
+
         if not intersections and not segments:
             painter.setPen(QColor("#344054"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
@@ -748,6 +812,11 @@ class RoadCanvas(QWidget):
                 screen_positions[intersection["id"]] = self.scenario_to_screen((float(pos[0]), float(pos[1])))
 
         sim_time = self.engine.time if self.engine is not None else 0.0
+
+        # Build all approach queue states once instead of scanning every car
+        # separately for every road segment.
+        queue_states = self._build_queue_states()
+        empty_queue_state = {"count": 0, "length_m": 0.0, "vehicle_ids": []}
 
         # 1. Draw directed road segments
         for segment in segments:
@@ -839,10 +908,10 @@ class RoadCanvas(QWidget):
             # Signal indication at approach stop line
             plan = self.signal_plans.get(to_node)
             if plan:
-                moves = [
-                    m["id"] for m in turning_movements
-                    if m.get("intersection") == to_node and m.get("from_segment") == segment.get("id")
-                ]
+                moves = movements_by_approach.get(
+                    (to_node, segment.get("id")),
+                    [],
+                )
 
                 approach_state = "RED"
                 if moves:
@@ -871,7 +940,10 @@ class RoadCanvas(QWidget):
                 painter.drawEllipse(ind_pt, ind_radius, ind_radius)
 
             # Authoritative queue state on this approach segment
-            q_state = self.get_queue_state(segment.get("id", ""))
+            q_state = queue_states.get(
+                segment.get("id", ""),
+                empty_queue_state,
+            )
             if q_state["count"] > 0:
                 q_count = q_state["count"]
                 q_len_m = q_state["length_m"]
@@ -1067,6 +1139,8 @@ class Workbench(QMainWindow):
         self.save_prompt_handler = None
         self._is_restoring_history: bool = False
         self._pending_edit_description: str = ""
+        # Collected without changing UI behaviour; acceptance tooling inspects it.
+        self.storage_errors: list[dict[str, str]] = []
 
         self.scenario_data = {}
         self.engine = None
@@ -1110,6 +1184,7 @@ class Workbench(QMainWindow):
 
         self.setFont(safe_font("Segoe UI", 10))
         self.history_tracker = SimulationHistoryTracker(min_sample_interval=1.0)
+        self.metrics_calculator = IncrementalMetricsCalculator()
         if self.engine is not None:
             self.history_tracker.record_state(self.engine)
         self.build_ui()
@@ -3185,10 +3260,8 @@ class Workbench(QMainWindow):
             self.timer.stop()
         self.engine.pause()
         self.engine.step()
-        if hasattr(self, "history_tracker"):
-            self.history_tracker.record_state(self.engine, force=True)
         self.canvas.update()
-        self.update_metrics()
+        self.update_metrics(force_history_sample=True)
         self.status_label.setText(
             "Simulation completed" if self.engine.finished
             else "Advanced one simulation step"
@@ -3231,7 +3304,6 @@ class Workbench(QMainWindow):
                 if self.timer.isActive():
                     self.timer.stop()
                 self.status_label.setText("Simulation completed")
-                self.update_metrics()
                 self._auto_capture_completed_run()
 
     def _shortcut_toggle_play_pause(self):
@@ -3315,8 +3387,10 @@ class Workbench(QMainWindow):
             self.progress_bar.setValue(max(0, min(1000, bar_val)))
             self.progress_bar.setFormat(f"{pct:.1f}% ({t:.1f} / {dur:.1f} s)")
 
-    def update_metrics(self):
+    def update_metrics(self, force_history_sample: bool = False):
         if self.engine is None:
+            if hasattr(self, "metrics_calculator"):
+                self.metrics_calculator.reset()
             if hasattr(self, "metric_status_label"):
                 val_result = getattr(self, "validate_current_network", lambda: None)()
                 if val_result and not val_result.is_valid:
@@ -3360,12 +3434,16 @@ class Workbench(QMainWindow):
             self.update_playback_controls_state()
             return
 
-        m = compute_metrics(self.engine)
+        m = self.metrics_calculator.calculate(self.engine)
         if self.engine.finished:
             self._auto_capture_completed_run()
 
         if hasattr(self, "history_tracker"):
-            self.history_tracker.record_state(self.engine, force=self.engine.finished)
+            self.history_tracker.record_state(
+                self.engine,
+                force=force_history_sample or self.engine.finished,
+                metrics=m,
+            )
         if hasattr(self, "timeline_widget"):
             self.timeline_widget.update_state(m.simulated_time, m.duration, m.status)
         if hasattr(self, "counts_chart"):
@@ -3521,10 +3599,20 @@ class Workbench(QMainWindow):
     def open_scenario_library(self):
         from tms_sim.ui.library import ScenarioLibraryDialog
 
-        dialog = ScenarioLibraryDialog(self, getattr(self, "library_path", None))
+        try:
+            dialog = ScenarioLibraryDialog(self, getattr(self, "library_path", None))
+        except Exception as exc:
+            self._record_storage_error("open scenario library", exc)
+            raise
         dialog.show()
         self.library_dialog = dialog
         return dialog
+
+    def _record_storage_error(self, operation: str, error: Exception) -> None:
+        """Retain storage failures for acceptance tooling and diagnostics."""
+        record = {"operation": operation, "error": str(error)}
+        if record not in self.storage_errors:
+            self.storage_errors.append(record)
 
     def _handle_load_error(self, message: str, status_msg: str):
         self.status_label.setText(f"Failed to load scenario: {status_msg}")
@@ -3863,6 +3951,7 @@ class Workbench(QMainWindow):
                     run_config=record.run_config or {},
                 )
         except Exception as exc:
+            self._record_storage_error("save completed simulation run", exc)
             logging.exception("Could not save completed simulation run")
 
             from PySide6.QtWidgets import QMessageBox
@@ -3956,6 +4045,7 @@ class Workbench(QMainWindow):
                     "Unreadable run records were skipped:\n" + "\n".join(unreadable),
                 )
         except Exception as exc:
+            self._record_storage_error("load persisted simulation runs", exc)
             logging.exception("Could not load saved simulation runs")
             QMessageBox.warning(self, "Run History Unavailable", f"Could not load saved runs:\n{exc}")
             return list(self.captured_runs)
