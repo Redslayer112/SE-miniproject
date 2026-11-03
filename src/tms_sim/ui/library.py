@@ -42,7 +42,13 @@ class ScenarioLibraryDialog(QDialog):
         layout.addWidget(self.list)
         layout.addLayout(buttons)
         layout.addLayout(files)
-        self.refresh()
+        try:
+            self.refresh()
+        except Exception:
+            # A failed initial read happens before the dialog can be retained by
+            # Workbench, so close the connection here instead of relying on GC.
+            self.store.close()
+            raise
 
     def refresh(self):
         self.list.clear()
@@ -68,7 +74,7 @@ class ScenarioLibraryDialog(QDialog):
             return False
         try:
             self.store.save_scenario(name, self.workbench.scenario_data, overwrite=bool(overwrite))
-        except ScenarioStoreError as exc:
+        except (ScenarioStoreError, OSError, sqlite3.Error) as exc:
             if overwrite is None and "already exists" in str(exc) and self._confirm(f"Replace '{name}'?"):
                 return self.save_current(name, overwrite=True)
             return self._fail(exc)
@@ -83,7 +89,7 @@ class ScenarioLibraryDialog(QDialog):
             return False
         try:
             document = self.store.load_scenario(name)
-        except ScenarioStoreError as exc:
+        except (ScenarioStoreError, OSError, sqlite3.Error) as exc:
             return self._fail(exc)
         return self.workbench.load_scenario_data(document, name)
 
@@ -123,7 +129,7 @@ class ScenarioLibraryDialog(QDialog):
     def _try(self, op, message: str, select: str | None = None) -> bool:
         try:
             op()
-        except (ScenarioStoreError, ScenarioFormatError, OSError) as exc:
+        except (ScenarioStoreError, ScenarioFormatError, OSError, sqlite3.Error) as exc:
             return self._fail(exc)
         self._done(message, select)
         return True
@@ -136,7 +142,7 @@ class ScenarioLibraryDialog(QDialog):
 
     def _fail(self, exc) -> bool:
         self.last_error = str(exc)
-        if isinstance(exc, (ScenarioStoreError, OSError)):
+        if isinstance(exc, (ScenarioStoreError, OSError, sqlite3.Error)):
             self.workbench._record_storage_error("scenario library operation", exc)
         QMessageBox.warning(self, "Scenario Library", str(exc))
         return False

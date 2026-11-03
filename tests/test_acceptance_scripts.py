@@ -13,6 +13,8 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from measure_gui_fps import (
     InputEventRecorder,
+    _finalize_benchmark_result,
+    _write_json_exclusive,
     acceptance_eligibility,
     cleanup_benchmark_resources,
     measurement_failure_reason,
@@ -89,13 +91,116 @@ def test_input_recorder_deduplicates_propagation_and_keeps_targets(qapp, event):
         qapp.removeEventFilter(recorder)
         parent.close()
 
-    assert len(recorder.events) == 1
-    record = recorder.events[0]
-    assert record["delivery_targets"] == ["child", "parent"]
-    assert record["spontaneous"] is False
-    assert record["origin"] == "internal_application"
-    assert record["unexpected_external_input"] is False
-    assert "timestamp" in record
+    assert len(recorder.events) == 2
+    records = recorder.events
+    assert [record["delivery_targets"][0]["label"] for record in records] == [
+        "child",
+        "parent",
+    ]
+    assert all(record["identity_uncertain"] for record in records)
+    assert all(record["spontaneous"] is False for record in records)
+    assert all(record["origin"] == "internal_application" for record in records)
+    assert all(record["unexpected_external_input"] is False for record in records)
+    assert all("timestamp" in record for record in records)
+
+
+def test_matching_event_at_parent_after_child_accepts_is_not_merged(qapp):
+    class AcceptingWidget(QWidget):
+        def keyPressEvent(self, event):
+            event.accept()
+
+    parent = QWidget()
+    child = AcceptingWidget(parent)
+    recorder = InputEventRecorder()
+    recorder.started_at = time.perf_counter()
+    qapp.installEventFilter(recorder)
+    try:
+        first = QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_A,
+            Qt.KeyboardModifier.NoModifier,
+            "a",
+        )
+        first.setTimestamp(4321)
+        QApplication.sendEvent(child, first)
+        assert first.isAccepted()
+
+        second = QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_A,
+            Qt.KeyboardModifier.NoModifier,
+            "a",
+        )
+        second.setTimestamp(4321)
+        QApplication.sendEvent(parent, second)
+    finally:
+        qapp.removeEventFilter(recorder)
+        parent.close()
+
+    assert len(recorder.events) == 2
+    assert [record["delivery_targets"][0]["label"] for record in recorder.events] == [
+        "AcceptingWidget",
+        "QWidget",
+    ]
+    assert all(record["identity_uncertain"] for record in recorder.events)
+
+
+def test_same_class_unnamed_widgets_keep_distinct_target_ids(qapp):
+    parent = QWidget()
+    child = QWidget(parent)
+    recorder = InputEventRecorder()
+    recorder.started_at = time.perf_counter()
+    qapp.installEventFilter(recorder)
+    try:
+        event = QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_A,
+            Qt.KeyboardModifier.NoModifier,
+            "a",
+        )
+        QApplication.sendEvent(child, event)
+    finally:
+        qapp.removeEventFilter(recorder)
+        parent.close()
+
+    assert len(recorder.events) == 2
+    targets = [record["delivery_targets"][0] for record in recorder.events]
+    assert [target["label"] for target in targets] == ["QWidget", "QWidget"]
+    assert [target["class_name"] for target in targets] == ["QWidget", "QWidget"]
+    assert len({target["target_id"] for target in targets}) == 2
+
+
+def test_input_recorder_keeps_identical_distinct_events_separate(qapp):
+    parent = QWidget()
+    child = QWidget(parent)
+    child.setObjectName("child")
+    parent.setObjectName("parent")
+    recorder = InputEventRecorder()
+    recorder.started_at = time.perf_counter()
+    qapp.installEventFilter(recorder)
+    try:
+        for _ in range(2):
+            event = QKeyEvent(
+                QEvent.Type.KeyPress,
+                Qt.Key.Key_A,
+                Qt.KeyboardModifier.NoModifier,
+                "a",
+            )
+            event.setTimestamp(1234)
+            QApplication.sendEvent(child, event)
+    finally:
+        qapp.removeEventFilter(recorder)
+        parent.close()
+
+    assert len(recorder.events) == 4
+    assert [event["delivery_targets"][0]["label"] for event in recorder.events] == [
+        "child",
+        "parent",
+        "child",
+        "parent",
+    ]
+    assert len({event["delivery_id"] for event in recorder.events}) == 4
+    assert any(event["identity_uncertain"] for event in recorder.events)
 
 
 def test_input_recorder_marks_external_origin_without_claiming_human_source(qapp):
@@ -136,11 +241,11 @@ def test_input_recorder_marks_external_origin_without_claiming_human_source(qapp
     recorder.eventFilter(parent, event)
     parent.close()
 
-    assert len(recorder.events) == 1
-    record = recorder.events[0]
-    assert record["origin"] == "external_system"
-    assert record["unexpected_external_input"] is True
-    assert "operator" not in record
+    assert len(recorder.events) == 2
+    assert all(record["origin"] == "external_system" for record in recorder.events)
+    assert all(record["unexpected_external_input"] is True for record in recorder.events)
+    assert all(record["identity_uncertain"] for record in recorder.events)
+    assert all("operator" not in record for record in recorder.events)
 
 
 def test_isolated_database_preflight_closes_reopens_and_removes(tmp_path):
@@ -195,6 +300,8 @@ def test_benchmark_cleanup_closes_retained_library_store_before_temp_removal(qap
         {"average_fps": None},
         {"no_unexpected_external_input": False},
         {"no_unexpected_external_input": None},
+        {"input_recording_unambiguous": False},
+        {"input_recording_unambiguous": None},
         {"no_storage_errors": False},
         {"no_execution_failure": False},
         {"cleanup_succeeded": False},
@@ -206,6 +313,7 @@ def test_acceptance_eligibility_fails_if_any_requirement_is_not_verified(overrid
         "duration_completed": True,
         "average_fps": 15.0,
         "no_unexpected_external_input": True,
+        "input_recording_unambiguous": True,
         "no_storage_errors": True,
         "no_execution_failure": True,
         "cleanup_succeeded": True,
@@ -221,11 +329,111 @@ def test_acceptance_eligibility_passes_only_when_all_requirements_are_verified()
         duration_completed=True,
         average_fps=15.0,
         no_unexpected_external_input=True,
+        input_recording_unambiguous=True,
         no_storage_errors=True,
         no_execution_failure=True,
         cleanup_succeeded=True,
         process_succeeded=True,
     ) is True
+
+
+@pytest.mark.parametrize(
+    ("failure", "worker_exit_code", "storage_errors", "app_cleanup", "temp_cleanup_error"),
+    [
+        ("worker", 7, [], True, None),
+        ("storage", 0, [{"operation": "save", "error": "disk I/O error"}], True, None),
+        ("cleanup", 0, [], False, None),
+    ],
+)
+def test_final_artifact_is_ineligible_on_worker_storage_or_cleanup_failure(
+    tmp_path,
+    failure,
+    worker_exit_code,
+    storage_errors,
+    app_cleanup,
+    temp_cleanup_error,
+):
+    result = {
+        "scenario": "synthetic-test-scenario",
+        "finished": True,
+        "duration_s": 30.0,
+        "simulation_time_s": 30.0,
+        "final_metrics": {"full_run_fps": 20.0},
+        "input_events": [],
+        "window_restoration_count": 0,
+        "storage_errors": storage_errors,
+        "benchmark_execution_succeeded": True,
+        "application_cleanup_succeeded": app_cleanup,
+        "application_cleanup_errors": [],
+    }
+    final_result = _finalize_benchmark_result(
+        result,
+        worker_exit_code=worker_exit_code,
+        temp_cleanup_error=temp_cleanup_error,
+    )
+    artifact = tmp_path / f"{failure}-failure.json"
+    _write_json_exclusive(artifact, final_result)
+    persisted = json.loads(artifact.read_text(encoding="utf-8"))
+
+    assert persisted["acceptance_eligible"] is False
+    assert persisted["acceptance_checks"]["process_succeeded"] is (worker_exit_code == 0)
+    assert persisted["acceptance_checks"]["no_storage_errors"] is (not storage_errors)
+    assert persisted["acceptance_checks"]["cleanup_succeeded"] is app_cleanup
+
+
+def test_final_artifact_is_ineligible_when_input_delivery_identity_is_uncertain(tmp_path):
+    result = {
+        "finished": True,
+        "duration_s": 30.0,
+        "simulation_time_s": 30.0,
+        "final_metrics": {"full_run_fps": 20.0},
+        "input_events": [{
+            "unexpected_external_input": False,
+            "identity_uncertain": True,
+        }],
+        "window_restoration_count": 0,
+        "storage_errors": [],
+        "benchmark_execution_succeeded": True,
+        "application_cleanup_succeeded": True,
+        "application_cleanup_errors": [],
+    }
+    final_result = _finalize_benchmark_result(
+        result,
+        worker_exit_code=0,
+        temp_cleanup_error=None,
+    )
+    artifact = tmp_path / "ambiguous-input.json"
+    _write_json_exclusive(artifact, final_result)
+    persisted = json.loads(artifact.read_text(encoding="utf-8"))
+
+    assert persisted["acceptance_checks"]["input_recording_unambiguous"] is False
+    assert persisted["acceptance_eligible"] is False
+
+
+def test_final_artifact_fails_closed_when_input_evidence_is_missing(tmp_path):
+    result = {
+        "finished": True,
+        "duration_s": 30.0,
+        "simulation_time_s": 30.0,
+        "final_metrics": {"full_run_fps": 20.0},
+        "window_restoration_count": 0,
+        "storage_errors": [],
+        "benchmark_execution_succeeded": True,
+        "application_cleanup_succeeded": True,
+        "application_cleanup_errors": [],
+    }
+    final_result = _finalize_benchmark_result(
+        result,
+        worker_exit_code=0,
+        temp_cleanup_error=None,
+    )
+    artifact = tmp_path / "missing-input-evidence.json"
+    _write_json_exclusive(artifact, final_result)
+    persisted = json.loads(artifact.read_text(encoding="utf-8"))
+
+    assert persisted["acceptance_checks"]["no_unexpected_external_input"] is False
+    assert persisted["acceptance_checks"]["input_recording_unambiguous"] is False
+    assert persisted["acceptance_eligible"] is False
 
 
 def test_load_test_script_creates_report(tmp_path):

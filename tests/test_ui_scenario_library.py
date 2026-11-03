@@ -1,6 +1,7 @@
 """Scenario Library dialog (#9, TC-LIB-01 through the workbench)."""
 import copy
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,53 @@ def test_storage_failures_are_recorded_without_changing_library_error_flow(lib, 
     assert win.storage_errors == [
         {"operation": "scenario library operation", "error": "test storage failure"}
     ]
+
+
+def test_sqlite_read_failure_is_recorded_and_reported(lib, monkeypatch, warnings):
+    win, dialog = lib
+
+    def fail_load(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(dialog.store, "load_scenario", fail_load)
+
+    assert not dialog.load_selected("Broken")
+    assert warnings[-1] == "database is locked"
+    assert win.storage_errors == [
+        {"operation": "scenario library operation", "error": "database is locked"}
+    ]
+
+
+def test_library_initialization_failure_closes_database_connection(qapp, tmp_path, monkeypatch):
+    import tms_sim.ui.library as library_module
+
+    created_stores = []
+    original_store = library_module.ScenarioStore
+
+    class FailingReadStore(original_store):
+        def __init__(self, path):
+            super().__init__(path)
+            created_stores.append(self)
+
+        def list_scenarios(self):
+            raise sqlite3.OperationalError("test initial read failure")
+
+    monkeypatch.setattr(library_module, "ScenarioStore", FailingReadStore)
+    workbench = Workbench(SAMPLE)
+    workbench.library_path = tmp_path / "initialization-failure.sqlite3"
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="initial read failure"):
+            workbench.open_scenario_library()
+        assert workbench.storage_errors == [
+            {"operation": "scenario library refresh", "error": "test initial read failure"},
+            {"operation": "open scenario library", "error": "test initial read failure"},
+        ]
+        assert len(created_stores) == 1
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            created_stores[0]._db.execute("SELECT 1")
+    finally:
+        workbench.timer.stop()
+        workbench.close()
 
 
 def test_import_export(lib, tmp_path):

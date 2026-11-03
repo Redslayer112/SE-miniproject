@@ -55,7 +55,7 @@ def measurement_failure_reason(
 
 
 class InputEventRecorder(QObject):
-    """Record distinct input events and their Qt propagation targets.
+    """Record input deliveries and flag ambiguous Qt propagation matches.
 
     A spontaneous event originated outside the application, but Qt does not say
     whether that source was a person, window management, or automation.
@@ -66,10 +66,58 @@ class InputEventRecorder(QObject):
         self.started_at = None
         self.events = []
         self._active_events = {}
+        self._target_identity_by_object = {}
+        self._target_references = {}
+        self._next_target_id = 1
+        self._next_event_id = 1
 
     @staticmethod
-    def _target_name(watched):
-        return getattr(watched, "objectName", lambda: "")() or type(watched).__name__
+    def _may_be_propagated_to_ancestor(watched, previous_target):
+        """Return whether a matching delivery could be parent propagation.
+
+        This is only a heuristic: Qt does not expose a stable identifier that
+        links cloned events during QWidget propagation. Callers must preserve
+        both deliveries and mark the association uncertain.
+        """
+        parent = previous_target.parent() if hasattr(previous_target, "parent") else None
+        while parent is not None:
+            if parent is watched:
+                return True
+            parent = parent.parent() if hasattr(parent, "parent") else None
+        return False
+
+    def _target_record(self, watched):
+        object_key = id(watched)
+        target_id = self._target_identity_by_object.get(object_key)
+        if target_id is not None and self._target_references[target_id] is not watched:
+            target_id = None
+        if target_id is None:
+            # PySide normally reuses wrappers, but compare live QObject wrappers
+            # as a fallback so one native widget keeps one session identity.
+            for candidate_id, candidate in self._target_references.items():
+                try:
+                    same_object = candidate is watched or candidate == watched
+                except RuntimeError:
+                    same_object = candidate is watched
+                if same_object:
+                    target_id = candidate_id
+                    self._target_identity_by_object[object_key] = candidate_id
+                    break
+        if target_id is None:
+            target_id = self._next_target_id
+            self._next_target_id += 1
+            self._target_identity_by_object[object_key] = target_id
+            # Keep a strong reference so Python cannot reuse the id during this
+            # recorder session. Only the session-local integer is serialized.
+            self._target_references[target_id] = watched
+        object_name = getattr(watched, "objectName", lambda: "")()
+        class_name = type(watched).__name__
+        return {
+            "target_id": target_id,
+            "label": object_name or class_name,
+            "object_name": object_name,
+            "class_name": class_name,
+        }
 
     @staticmethod
     def _event_key(event):
@@ -131,30 +179,52 @@ class InputEventRecorder(QObject):
             QEvent.Type.MouseButtonPress,
         ):
             key = self._event_key(event)
-            target = self._target_name(watched)
-            record = self._active_events.get(key)
-            if record is None:
-                spontaneous = bool(event.spontaneous())
-                record = {
-                    "elapsed_wall_seconds": round(time.perf_counter() - self.started_at, 3),
-                    "event_type": (
-                        "key_press"
-                        if event.type() == QEvent.Type.KeyPress
-                        else "mouse_press"
-                    ),
-                    "origin": "external_system" if spontaneous else "internal_application",
-                    "spontaneous": spontaneous,
-                    "unexpected_external_input": spontaneous,
-                    "delivery_targets": [],
-                    **self._input_metadata(event),
-                }
-                self.events.append(record)
-                self._active_events[key] = record
-                # Parent propagation is synchronous; expire the identity after
-                # the current event dispatch so later presses remain distinct.
-                QTimer.singleShot(0, lambda event_key=key: self._active_events.pop(event_key, None))
-            if target not in record["delivery_targets"]:
-                record["delivery_targets"].append(target)
+            active = self._active_events.get(key)
+            possible_propagation = active is not None and self._may_be_propagated_to_ancestor(
+                watched, active["last_target"]
+            )
+            spontaneous = bool(event.spontaneous())
+            target = self._target_record(watched)
+            delivery_id = self._next_event_id
+            self._next_event_id += 1
+            record = {
+                "delivery_id": delivery_id,
+                "elapsed_wall_seconds": round(time.perf_counter() - self.started_at, 3),
+                "event_type": (
+                    "key_press"
+                    if event.type() == QEvent.Type.KeyPress
+                    else "mouse_press"
+                ),
+                "origin": "external_system" if spontaneous else "internal_application",
+                "spontaneous": spontaneous,
+                "unexpected_external_input": spontaneous,
+                "identity_uncertain": bool(possible_propagation),
+                "possible_propagation_of_delivery_id": (
+                    active["record"]["delivery_id"] if possible_propagation else None
+                ),
+                "delivery_targets": [target],
+                **self._input_metadata(event),
+            }
+            if possible_propagation:
+                active["record"]["identity_uncertain"] = True
+                active["record"].setdefault(
+                    "possible_propagation_delivery_ids", []
+                ).append(delivery_id)
+            self.events.append(record)
+
+            # Do not merge on matching metadata: propagated Qt deliveries can
+            # be clones, and a separate event can have the same signature.
+            # Retain a short-lived candidate only to annotate uncertainty.
+            current = {"record": record, "last_target": watched}
+            self._active_events[key] = current
+            QTimer.singleShot(
+                0,
+                lambda event_key=key, active_event=current: (
+                    self._active_events.pop(event_key, None)
+                    if self._active_events.get(event_key) is active_event
+                    else None
+                ),
+            )
         return False
 
 
@@ -163,6 +233,7 @@ def acceptance_eligibility(
     duration_completed: bool | None,
     average_fps: float | None,
     no_unexpected_external_input: bool | None,
+    input_recording_unambiguous: bool | None,
     no_storage_errors: bool | None,
     no_execution_failure: bool | None,
     cleanup_succeeded: bool | None,
@@ -174,6 +245,7 @@ def acceptance_eligibility(
         and average_fps is not None
         and average_fps >= 15.0
         and no_unexpected_external_input is True
+        and input_recording_unambiguous is True
         and no_storage_errors is True
         and no_execution_failure is True
         and cleanup_succeeded is True
@@ -288,6 +360,84 @@ def _write_json_exclusive(path: Path, data: dict) -> None:
         json.dump(data, stream, indent=2)
 
 
+def _finalize_benchmark_result(
+    result: dict,
+    *,
+    worker_exit_code: int,
+    temp_cleanup_error: str | None,
+) -> dict:
+    """Derive the final acceptance fields from measured worker outcomes."""
+    result["process_exit_code"] = worker_exit_code
+    result["process_succeeded"] = worker_exit_code == 0
+    result["supervisor_temporary_cleanup_succeeded"] = temp_cleanup_error is None
+    if temp_cleanup_error:
+        result.setdefault("application_cleanup_errors", []).append(temp_cleanup_error)
+    result["cleanup_succeeded"] = (
+        result.get("application_cleanup_succeeded") is True
+        and temp_cleanup_error is None
+    )
+    input_events = result.get("input_events")
+    input_events_valid = isinstance(input_events, list)
+    events = input_events if input_events_valid else []
+    result["unexpected_external_input"] = not input_events_valid or any(
+        event.get("unexpected_external_input") is not False for event in events
+    )
+    result["no_unexpected_external_input"] = (
+        not result["unexpected_external_input"]
+        and result.get("window_restoration_count") == 0
+    )
+    result["input_recording_unambiguous"] = (
+        input_events_valid
+        and all(event.get("identity_uncertain") is False for event in events)
+    )
+    storage_errors = result.get("storage_errors")
+    result["no_storage_errors"] = (
+        isinstance(storage_errors, list) and not storage_errors
+    )
+    metrics = result.get("final_metrics") or {}
+    result["acceptance_checks"] = {
+        "duration_completed": (
+            result.get("finished") is True
+            and float(result.get("simulation_time_s") or 0.0)
+            >= float(result.get("duration_s") or float("inf"))
+        ),
+        "average_fps_at_least_15": (
+            metrics.get("full_run_fps") is not None
+            and float(metrics["full_run_fps"]) >= 15.0
+        ),
+        "no_unexpected_external_input": result["no_unexpected_external_input"],
+        "input_recording_unambiguous": result["input_recording_unambiguous"],
+        "no_storage_errors": result["no_storage_errors"],
+        "no_benchmark_execution_failure": (
+            result.get("benchmark_execution_succeeded") is True
+        ),
+        "cleanup_succeeded": result["cleanup_succeeded"],
+        "process_succeeded": result["process_succeeded"],
+    }
+    result["acceptance_eligible"] = acceptance_eligibility(
+        duration_completed=result["acceptance_checks"]["duration_completed"],
+        average_fps=metrics.get("full_run_fps"),
+        no_unexpected_external_input=(
+            result["acceptance_checks"]["no_unexpected_external_input"]
+        ),
+        input_recording_unambiguous=(
+            result["acceptance_checks"]["input_recording_unambiguous"]
+        ),
+        no_storage_errors=result["acceptance_checks"]["no_storage_errors"],
+        no_execution_failure=(
+            result["acceptance_checks"]["no_benchmark_execution_failure"]
+        ),
+        cleanup_succeeded=result["acceptance_checks"]["cleanup_succeeded"],
+        process_succeeded=result["acceptance_checks"]["process_succeeded"],
+    )
+    result["acceptance_note"] = (
+        "Performance measurements are reported independently. Eligibility is finalized only "
+        "after full duration, FPS, input provenance, unambiguous event recording, storage, "
+        "execution, cleanup, and worker-exit checks."
+    )
+    return result
+
+
 def _run_gui_worker(args) -> int:
     """Run the visible Qt measurement in a child process supervised by main()."""
     stage_output = args._stage_output
@@ -373,6 +523,10 @@ def _run_gui_worker(args) -> int:
             "input_events": recorder.events if recorder is not None else [],
             "unexpected_external_input": any(
                 event.get("unexpected_external_input")
+                for event in (recorder.events if recorder is not None else [])
+            ),
+            "input_recording_unambiguous": not any(
+                event.get("identity_uncertain")
                 for event in (recorder.events if recorder is not None else [])
             ),
             "samples": samples,
@@ -659,54 +813,12 @@ def _run_supervisor(args) -> int:
             "application_cleanup_errors": [process_error] if process_error else [],
         }
 
-    result["process_exit_code"] = worker_exit_code
-    result["process_succeeded"] = worker_exit_code == 0
-    result["supervisor_temporary_cleanup_succeeded"] = temp_cleanup_error is None
-    if temp_cleanup_error:
-        result.setdefault("application_cleanup_errors", []).append(temp_cleanup_error)
-    result["cleanup_succeeded"] = (
-        result.get("application_cleanup_succeeded") is True
-        and temp_cleanup_error is None
+    result = _finalize_benchmark_result(
+        result,
+        worker_exit_code=worker_exit_code,
+        temp_cleanup_error=temp_cleanup_error,
     )
-    result["unexpected_external_input"] = any(
-        event.get("unexpected_external_input")
-        for event in result.get("input_events", [])
-    )
-    result["no_unexpected_external_input"] = (
-        not result["unexpected_external_input"]
-        and result.get("window_restoration_count", 0) == 0
-    )
-    result["no_storage_errors"] = not result.get("storage_errors", [])
     metrics = result.get("final_metrics") or {}
-    result["acceptance_checks"] = {
-        "duration_completed": (
-            result.get("finished") is True
-            and float(result.get("simulation_time_s") or 0.0)
-            >= float(result.get("duration_s") or float("inf"))
-        ),
-        "average_fps_at_least_15": (
-            metrics.get("full_run_fps") is not None
-            and float(metrics["full_run_fps"]) >= 15.0
-        ),
-        "no_unexpected_external_input": result["no_unexpected_external_input"],
-        "no_storage_errors": result["no_storage_errors"],
-        "no_benchmark_execution_failure": result.get("benchmark_execution_succeeded") is True,
-        "cleanup_succeeded": result["cleanup_succeeded"],
-        "process_succeeded": result["process_succeeded"],
-    }
-    result["acceptance_eligible"] = acceptance_eligibility(
-        duration_completed=result["acceptance_checks"]["duration_completed"],
-        average_fps=metrics.get("full_run_fps"),
-        no_unexpected_external_input=result["acceptance_checks"]["no_unexpected_external_input"],
-        no_storage_errors=result["acceptance_checks"]["no_storage_errors"],
-        no_execution_failure=result["acceptance_checks"]["no_benchmark_execution_failure"],
-        cleanup_succeeded=result["acceptance_checks"]["cleanup_succeeded"],
-        process_succeeded=result["acceptance_checks"]["process_succeeded"],
-    )
-    result["acceptance_note"] = (
-        "Performance measurements are reported independently. Eligibility is finalized only "
-        "after full duration, FPS, input, storage, execution, cleanup, and worker-exit checks."
-    )
     try:
         _write_json_exclusive(args.output, result)
     except Exception as exc:
