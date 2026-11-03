@@ -69,10 +69,16 @@ class ScenarioStore:
         path = Path(db_path) if db_path else default_db_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
-        self._db.executescript(_SCHEMA)
-        columns = {row[1] for row in self._db.execute("PRAGMA table_info(runs)")}
-        if "run_config" not in columns:
-            self._db.execute("ALTER TABLE runs ADD COLUMN run_config TEXT NOT NULL DEFAULT '{}' ")
+        try:
+            self._db.executescript(_SCHEMA)
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(runs)")}
+            if "run_config" not in columns:
+                self._db.execute("ALTER TABLE runs ADD COLUMN run_config TEXT NOT NULL DEFAULT '{}' ")
+        except Exception:
+            # Construction can fail after connect() succeeds. Close here because
+            # __exit__ is unavailable until __init__ returns successfully.
+            self._db.close()
+            raise
 
     def close(self) -> None:
         self._db.close()

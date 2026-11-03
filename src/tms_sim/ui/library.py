@@ -5,6 +5,7 @@ so it can be driven from tests without dialogs. Errors are shown, never swallowe
 """
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -45,7 +46,11 @@ class ScenarioLibraryDialog(QDialog):
 
     def refresh(self):
         self.list.clear()
-        self.list.addItems(self.store.list_scenarios())
+        try:
+            self.list.addItems(self.store.list_scenarios())
+        except (ScenarioStoreError, OSError, sqlite3.Error) as exc:
+            self.workbench._record_storage_error("scenario library refresh", exc)
+            raise
 
     def selected(self) -> str | None:
         item = self.list.currentItem()
@@ -131,6 +136,8 @@ class ScenarioLibraryDialog(QDialog):
 
     def _fail(self, exc) -> bool:
         self.last_error = str(exc)
+        if isinstance(exc, (ScenarioStoreError, OSError)):
+            self.workbench._record_storage_error("scenario library operation", exc)
         QMessageBox.warning(self, "Scenario Library", str(exc))
         return False
 

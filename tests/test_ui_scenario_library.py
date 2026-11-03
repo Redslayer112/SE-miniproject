@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from tms_sim.storage.store import ScenarioStore
+from tms_sim.storage.store import ScenarioStore, ScenarioStoreError
 from tms_sim.ui.app import Workbench
 
 SAMPLE = Path(__file__).resolve().parent / "data" / "scenario" / "small_valid_scenario.json"
@@ -86,6 +86,21 @@ def test_name_clash_reports_error(lib, warnings):
     d.save_current("Same")
     assert not d.save_current("Same", overwrite=False)
     assert "already exists" in warnings[-1]
+
+
+def test_storage_failures_are_recorded_without_changing_library_error_flow(lib, monkeypatch, warnings):
+    win, dialog = lib
+
+    def fail_save(*_args, **_kwargs):
+        raise ScenarioStoreError("test storage failure")
+
+    monkeypatch.setattr(dialog.store, "save_scenario", fail_save)
+
+    assert not dialog.save_current("Broken")
+    assert warnings[-1] == "test storage failure"
+    assert win.storage_errors == [
+        {"operation": "scenario library operation", "error": "test storage failure"}
+    ]
 
 
 def test_import_export(lib, tmp_path):
