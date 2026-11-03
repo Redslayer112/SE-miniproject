@@ -1,6 +1,6 @@
 # 0001 – Specification baseline (issue #1)
 
-**Status: APPROVED by all four teammates on issue #1** (dispositions by @vikhyathks-10, @hashvyas, @vikasnnaik, @Redslayer112; final confirmation 27 Oct 2026). The SRS/SAD/STP document owners still need to copy these decisions into the documents before #1 closes.
+**Status: APPROVED by all four teammates on issue #1** (dispositions by @vikhyathks-10, @hashvyas, @vikasnnaik, @Redslayer112; final confirmation 27 Oct 2026). Section-by-section changes to the SRS, SAD and STP are recorded in [`../baseline_amendment_v1.1.md`](../baseline_amendment_v1.1.md).
 
 | # | Item | Decision | Rationale | Where in code |
 |---|---|---|---|---|

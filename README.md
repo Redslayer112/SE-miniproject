@@ -81,7 +81,8 @@ The repository includes the following supporting documents:
 
 | **Document** | **Location** | **Purpose** |
 | --- | --- | --- |
-| Baseline proposal | `docs/decisions/0001-baseline-proposal.md` | Proposes decisions for aligning requirements, architecture, and implementation |
+| Baseline decisions (approved) | `docs/decisions/0001-baseline-proposal.md` | Team-approved decisions (issue #1) aligning requirements, architecture, and implementation |
+| Baseline amendment v1.1 | `docs/baseline_amendment_v1.1.md` | Section-by-section changes to the submitted SRS, SAD and STP |
 | Requirements Traceability Matrix draft | `docs/rtm_draft.csv` | Maps requirements to implementation and testing references |
 | Test catalogue | `docs/test_catalogue.md` | Organizes test cases and test coverage information |
 | Deviations log | `DEVIATIONS.md` | Records differences between the implementation and the SRS, SAD, and STP |
