@@ -43,7 +43,7 @@
 | Test ID | Requirement | Preconditions / procedure | Expected result | Status |
 | --- | --- | --- | --- | --- |
 | TC-PERF-01 | TMS-NF-001 | Reference scenario: 10 intersections / 500 vehicles / fixed seed / 1 simulated hour; measure complete-run FPS at 1x | At least 15 FPS average under the approved full-run formula | **Incomplete / Blocked** — GUI stalled at 2,123.6/3,600 s; partial 6.45 FPS is diagnostic only. See `docs/issue12_acceptance.md`. |
-| TC-REL-01 | TMS-NF-002 | Run the agreed seeded reliability scenario three times for one simulated hour each | All runs complete without crash | **Incomplete / Blocked** — three headless runs passed, but required GUI runs were not completed. See `artifacts/issue12/system_checks.json`. |
+| TC-REL-01 | TMS-NF-002 | Run the agreed seeded reliability scenario three times for one simulated hour each | All runs complete without crash | **Incomplete / Blocked** — headless evidence: three one-hour runs passed. 4x GUI evidence: seed 42 completed one hour; seeds 43 and 44 paused after recorded mouse presses. These do not establish three clean GUI runs. See `artifacts/issue12/system_checks.json` and `artifacts/issue12/gui_4x_reliability_seed4*.json`. |
 | TC-UX-01 | TMS-NF-003 | Five new testers attempt to build and run a two-intersection network without help; time each attempt | At least four of five finish within ten minutes | **Blocked** — no human participants; automated fixture workflow is not user testing. |
 | TC-PORT-01 | TMS-NF-004 | Install and run the agreed reference scenario on clean Windows 10 and Windows 11 environments | Installation, launch and scenario execution succeed on both environments | **Blocked** — clean Windows 10/11 environments were unavailable. |
 

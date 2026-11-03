@@ -28,6 +28,30 @@ def test_save_list_load(store):
     assert store.load_scenario("a") == DOC
 
 
+def test_store_constructor_closes_connection_if_schema_setup_fails(tmp_path, monkeypatch):
+    import tms_sim.storage.store as store_module
+
+    db_path = tmp_path / "broken-schema.sqlite3"
+    connections = []
+    connect = sqlite3.connect
+
+    def tracked_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(store_module.sqlite3, "connect", tracked_connect)
+    monkeypatch.setattr(store_module, "_SCHEMA", "CREATE TABLE partial (value); INVALID SQL;")
+
+    with pytest.raises(sqlite3.OperationalError):
+        ScenarioStore(db_path)
+
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
+    db_path.unlink()
+
+
 def test_loaded_scenario_runs(store):
     store.save_scenario("demo", DOC)
     e = engine_from_document(store.load_scenario("demo"))
