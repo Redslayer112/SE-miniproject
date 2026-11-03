@@ -131,6 +131,7 @@ def test_history_tracker_correct_counts_and_trips():
     while len(engine.exited) < 2 and not engine.finished:
         engine.step()
         tracker.record_state(engine)
+    tracker.record_state(engine, force=True)  # samples are throttled; take one at the moment checked
 
     assert len(tracker.samples) > 0
     latest = tracker.samples[-1]
