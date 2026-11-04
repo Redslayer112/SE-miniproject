@@ -84,6 +84,19 @@ def scenario_from_dict(data: dict[str, Any]) -> dict[str, Any]:
                 f"simulation is missing required field: {field}"
             )
 
+    # Types only; ranges are checked by sim.scenario.validate_scenario before a run.
+    seed = simulation["seed"]
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ScenarioFormatError(
+            f"simulation.seed must be an integer, got {seed!r}"
+        )
+    for field in ("duration_s", "time_step_s"):
+        value = simulation[field]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ScenarioFormatError(
+                f"simulation.{field} must be a number, got {value!r}"
+            )
+
     return deepcopy(data)
 
 
