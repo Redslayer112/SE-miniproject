@@ -104,3 +104,14 @@ the new commit and actual result.
   - Stop control is treated as yield, with no full stop before the gap check (DEVIATIONS #3).
   - "Network entry" is not defined in the baseline. `validate_scenario` treats a segment that no turning movement leads onto as an entry. Demand on any other existing segment is only a `NOT_NETWORK_ENTRY` warning, because no submitted document makes it blocking.
   - Warnings from `validate_scenario` are returned to callers but are not yet shown in the UI (UI is out of this issue's scope).
+
+## Issue #33 (S3-07) verification (2026-11-04)
+
+- **Scope:** system integration across network, signal, demand, engine, metrics, store, comparison, CSV reporting and the Workbench. Workflow matrix, defects and blocked tests: `docs/system_integration_report.md`.
+- **Environment:** Windows 11 build 26300; project virtualenv `.venv` with CPython 3.12.10, pytest 9.2.0, PySide6 6.12.0.
+- **Baseline command (before any change):** `.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest-tmp`. Pytest result: **532 passed**. Process exit: **0**.
+- **Targeted command:** `.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest-tmp tests/test_system_integration.py`. Pytest result: **16 passed, 2 xfailed**. Process exit: **0**. The two strict xfails record open defects SI-D2 and SI-D3.
+- **Final command:** `.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest-tmp`. Pytest result: **548 passed, 2 xfailed**. Process exit: **0**. The known native shutdown abort (K-3) was not observed in these runs; it is not claimed fixed.
+- **Static check:** `.venv\Scripts\python.exe -m compileall -q src tests`. Process exit: **0**.
+- **Source change:** `src/tms_sim/sim/serialization.py` accepts an empty `signal_plans` list (defect SI-D1), with regression tests in `tests/test_system_integration.py`.
+- **Not executed:** one-hour GUI benchmarks (TC-PERF-01, TC-REL-01 GUI part), TC-UX-01, TC-PORT-01, and a human visual review for TC-SIM-04.
