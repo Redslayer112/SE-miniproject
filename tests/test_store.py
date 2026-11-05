@@ -202,3 +202,25 @@ def test_existing_run_database_is_migrated_with_empty_run_config(tmp_path):
         upgraded.save_run("new", "Scenario", "New", "2026-10-29T12:00:00", 1,
                           DOC, {"vehicles_completed": 0}, {"duration_s": 20.0})
         assert upgraded.load_run("new")["run_config"] == {"duration_s": 20.0}
+
+
+@pytest.mark.parametrize("text", [
+    "",
+    "[]",
+    json.dumps({k: v for k, v in DOC.items() if k != "demand"}),
+    json.dumps({k: v for k, v in DOC.items() if k != "simulation"}),
+    json.dumps({k: v for k, v in DOC.items() if k != "network"}),
+    json.dumps({**DOC, "schema_version": "2.0"}),
+    json.dumps({**DOC, "simulation": {**DOC["simulation"], "seed": "42"}}),
+    json.dumps({**DOC, "demand": []}),
+], ids=["empty", "non_object", "no_demand", "no_simulation", "no_network", "wrong_version", "seed_string",
+        "demand_list"])
+def test_incomplete_import_is_rejected_with_nothing_stored(store, tmp_path, text):  # Issue #28
+    f = tmp_path / "bad.json"
+    f.write_text(text, encoding="utf-8")
+    with pytest.raises(ScenarioFormatError):
+        store.import_scenario(f)
+    if text.startswith("{"):
+        with pytest.raises(ScenarioFormatError):
+            store.save_scenario("bad", json.loads(text))
+    assert store.list_scenarios() == []
