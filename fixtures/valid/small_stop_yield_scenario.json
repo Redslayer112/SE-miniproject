@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "reference-stop-yield-001",
+  "name": "Small stop and yield reference network",
+  "units": {
+    "length": "m",
+    "speed": "m/s",
+    "time": "s"
+  },
+  "network": {
+    "intersections": [
+      {"id": "C", "position": [0, 0], "control_type": "stop_controlled"},
+      {"id": "S", "position": [0, -100], "control_type": "uncontrolled"},
+      {"id": "W", "position": [-100, 0], "control_type": "uncontrolled"},
+      {"id": "E", "position": [100, 0], "control_type": "uncontrolled"},
+      {"id": "N", "position": [0, 100], "control_type": "yield_controlled"},
+      {"id": "X", "position": [100, 100], "control_type": "uncontrolled"},
+      {"id": "Y", "position": [0, 200], "control_type": "uncontrolled"}
+    ],
+    "segments": [
+      {"id": "SC", "from": "S", "to": "C", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9},
+      {"id": "WC", "from": "W", "to": "C", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9},
+      {"id": "CN", "from": "C", "to": "N", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9},
+      {"id": "CE", "from": "C", "to": "E", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9},
+      {"id": "XN", "from": "X", "to": "N", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9},
+      {"id": "NY", "from": "N", "to": "Y", "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9}
+    ],
+    "turning_movements": [
+      {"id": "SN", "intersection": "C", "from_segment": "SC", "to_segment": "CN"},
+      {"id": "WE", "intersection": "C", "from_segment": "WC", "to_segment": "CE"},
+      {"id": "CY", "intersection": "N", "from_segment": "CN", "to_segment": "NY"},
+      {"id": "XY", "intersection": "N", "from_segment": "XN", "to_segment": "NY"}
+    ]
+  },
+  "signal_plans": [],
+  "demand": {
+    "arrival_rates_vehicles_per_hour": {
+      "SC": 300,
+      "WC": 300,
+      "XN": 200
+    },
+    "turning_ratios": {
+      "SN": 1.0,
+      "WE": 1.0,
+      "XY": 1.0
+    }
+  },
+  "simulation": {
+    "seed": 7,
+    "duration_s": 120,
+    "time_step_s": 0.5
+  }
+}

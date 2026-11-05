@@ -49,9 +49,12 @@ def scenario_from_dict(data: dict[str, Any]) -> dict[str, Any]:
             plans = [data["signal_plan"]]
         else:
             plans = data["signal_plans"]
-            if not isinstance(plans, list) or not plans:
+            # Empty is allowed: a network with no signalized intersection needs
+            # no plan (Issue #33 defect SI-D1); build_engine still blocks a
+            # signalized intersection that has no plan.
+            if not isinstance(plans, list):
                 raise ScenarioFormatError(
-                    "signal_plans must be a non-empty list."
+                    "signal_plans must be a list."
                 )
 
         for plan in plans:
