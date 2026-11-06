@@ -14,7 +14,9 @@ Objectives are to verify network and signal validation, seeded demand and engine
 
 ## 2. Source documents and scope
 
-Sources: SRS v0.2, SAD v1.0, STP v1.0, `docs/test_catalogue.md`, `docs/rtm_draft.csv`, and the Issue #12 acceptance evidence. The SRS/STP reference Windows 10/11, Python 3.11 and PySide6, with a stated reference system of Intel i5-11400H and 16 GB RAM. The latest local test run used Windows 11 build 26300, CPython 3.13.7, PySide6 6.12.0 and pytest 9.1.0; this is not the SRS reference CPU environment.
+Sources: The normative requirements and design baselines are SRS v0.2, SAD v1.0 and STP v1.0. Consolidated document editions are available as `docs/SRS_v1.1.docx`, `docs/SAD_v1.1.docx` and `docs/Test_Plan_v1.1.docx`, with corresponding PDF versions. The v1.1 package edition does not independently change or approve the normative requirements baseline. Other sources include `docs/test_catalogue.md`, `docs/rtm_draft.csv` and the Issue #12 acceptance evidence.
+
+The SRS/STP reference Windows 10/11, Python 3.11 and PySide6, with a stated reference system of Intel i5-11400H and 16 GB RAM. The latest local test run used Windows 11 build 26300, CPython 3.13.7, PySide6 6.12.0 and pytest 9.1.0; this is not the SRS reference CPU environment.
 
 In scope: road networks, signal plans, demand, simulation and controls, UI/visualization, metrics, run/scenario persistence, comparison, reporting/export, integration, error/boundary behavior, regression, and NFR acceptance procedures. Out of scope per STP: field hardware, 3D, distributed simulation, advanced lane changing, field-data calibration, transit scheduling, and pedestrian/cyclist microsimulation.
 
