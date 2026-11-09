@@ -3177,6 +3177,9 @@ class Workbench(QMainWindow):
         self.refresh_signal_plans_ui()
         val_result = self.validate_current_network()
 
+        # A rebuilt or discarded engine has independent auto-capture state.
+        self._reset_run_capture_state()
+
         # Re-initialize engine if network is valid
         if val_result.is_valid:
             try:
@@ -3269,11 +3272,15 @@ class Workbench(QMainWindow):
         if self.engine.finished:
             self._auto_capture_completed_run()
 
+    def _reset_run_capture_state(self):
+        """Clear the per-engine automatic-capture and deduplication state."""
+        self._last_captured_engine_finished_state = False
+        self._last_captured_engine_signature = None
+
     def reset_simulation(self):
         if self.timer.isActive():
             self.timer.stop()
-        self._last_captured_engine_finished_state = False
-        self._last_captured_engine_signature = None
+        self._reset_run_capture_state()
         if self.engine is not None:
             self.engine.reset()
             if hasattr(self, "speed_box"):
@@ -3576,6 +3583,7 @@ class Workbench(QMainWindow):
         self.timer.stop()
         self.scenario_path = path
         self.scenario_data = new_data
+        self._reset_run_capture_state()
         self.engine = new_engine
 
         self.change_speed(self.speed_box.currentText())

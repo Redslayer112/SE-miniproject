@@ -300,7 +300,7 @@ def test_compute_metrics_standalone():
     assert m.average_delay_s is None
 
 def test_average_speed_metric():
-    """Average speed is the mean speed of currently active vehicles."""
+    """Average speed is unavailable without measured vehicle-time."""
     from types import SimpleNamespace
     from typing import cast
     from tms_sim.reporting.metrics import compute_metrics
@@ -321,7 +321,7 @@ def test_average_speed_metric():
 
     metrics = compute_metrics(cast(Engine, engine))
 
-    assert metrics.average_speed_mps == 5.0
+    assert metrics.average_speed_mps is None
     assert metrics.vehicles_in_network == 2
 
 

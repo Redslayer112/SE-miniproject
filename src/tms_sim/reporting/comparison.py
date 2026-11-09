@@ -352,7 +352,10 @@ def compare_runs(
             baseline_val=baseline_metrics.average_speed_mps,
             candidate_val=candidate_metrics.average_speed_mps,
             direction=MetricDirection.HIGHER_IS_BETTER,
-            note="Mean instantaneous speed of active vehicles",
+            note=(
+                "Total simulated vehicle distance divided by vehicle-time, "
+                "including stationary time"
+            ),
         ),
     ]
 

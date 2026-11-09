@@ -282,7 +282,6 @@ def test_workbench_library_run_dashboard_history_comparison_and_csv(win, tmp_pat
     assert len(stored_runs(win)) == 1  # auto-captured on completion
 
     assert library.load_selected("SI candidate")
-    win.reset_simulation()  # needed after a library load: see SI-D2 and the xfail test below
     run_in_workbench(win)
     candidate_metrics = compute_metrics(win.engine)
     dashboard_matches(win, candidate_metrics)
@@ -314,9 +313,6 @@ def test_workbench_library_run_dashboard_history_comparison_and_csv(win, tmp_pat
     assert rows["throughput_vph"]["Value"] + " veh/h" == win.throughput_label.text()
 
 
-@pytest.mark.xfail(strict=True, reason="SI-D2 (UI, ui/app.py): _load_scenario does not clear "
-                   "_last_captured_engine_finished_state, so a run finished after loading another "
-                   "scenario is not auto-captured or persisted")
 def test_run_after_library_load_is_auto_captured(win):
     save_to_library(win, "first", load(SMALL, duration_s=30))
     save_to_library(win, "second", load(SMALL, duration_s=30, seed=43))
@@ -327,6 +323,17 @@ def test_run_after_library_load_is_auto_captured(win):
     assert library.load_selected("second")
     run_in_workbench(win)  # no Reset pressed
     assert [r["seed"] for r in stored_runs(win)] == [42, 43]
+
+
+def test_run_after_network_modification_is_auto_captured(win):
+    run_in_workbench(win)
+    assert len(stored_runs(win)) == 1
+
+    win.on_network_modified()
+    run_in_workbench(win)
+
+    runs = stored_runs(win)
+    assert [run["seed"] for run in runs] == [42, 42]
 
 
 # --- SI-02: visualization equals engine state (TC-SIM-04) ------------------------------------------
