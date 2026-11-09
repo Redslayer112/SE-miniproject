@@ -491,6 +491,31 @@ def test_dialog_selecting_runs_and_swapping(workbench):
         dialog.close()
 
 
+def test_comparison_dialog_formats_deltas_and_percentages(workbench):
+    baseline = SimulationRunRecord(
+        "baseline",
+        "Baseline",
+        "Small Net",
+        _make_dummy_metrics(travel_time=10.0, completed=10),
+    )
+    candidate = SimulationRunRecord(
+        "candidate",
+        "Candidate",
+        "Small Net",
+        _make_dummy_metrics(travel_time=12.5, completed=12),
+    )
+    workbench.captured_runs.extend([baseline, candidate])
+    dialog = ScenarioComparisonDialog(workbench)
+
+    try:
+        assert dialog.table.item(0, 3).text() == "+2.50"
+        assert dialog.table.item(0, 4).text() == "+25.0%"
+        assert dialog.table.item(1, 3).text() == "+2"
+        assert dialog.table.item(1, 4).text() == "+20.0%"
+    finally:
+        dialog.close()
+
+
 def test_workbench_auto_capture_on_simulation_completion(workbench):
     """Verify a completed simulation is automatically captured."""
     initial_count = len(workbench.captured_runs)
@@ -566,3 +591,9 @@ def test_average_speed_is_included_in_run_comparison():
     assert speed_metric.absolute_change == 3.0
     assert speed_metric.percent_change == 60.0
     assert speed_metric.status == ComparisonStatus.IMPROVED
+    assert speed_metric.name == "Average Speed"
+    assert speed_metric.unit == "m/s"
+    assert speed_metric.note == (
+        "Total simulated vehicle distance divided by vehicle-time, "
+        "including stationary time"
+    )

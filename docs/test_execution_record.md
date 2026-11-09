@@ -115,3 +115,18 @@ the new commit and actual result.
 - **Static check:** `.venv\Scripts\python.exe -m compileall -q src tests`. Process exit: **0**.
 - **Source change:** `src/tms_sim/sim/serialization.py` accepts an empty `signal_plans` list (defect SI-D1), with regression tests in `tests/test_system_integration.py`.
 - **Not executed:** one-hour GUI benchmarks (TC-PERF-01, TC-REL-01 GUI part), TC-UX-01, TC-PORT-01, and a human visual review for TC-SIM-04.
+
+## Issue #30 (S3-04) final integrated verification (2026-11-09)
+
+- **Branch:** `issue-30/s3-04-metrics-persistence-csv-validation`.
+- **HEAD commit:** `9e5d2af670d7ce0c869d6a384623817fffa6d769`.
+- **Worktree state:** Verification was performed with the Issue #30 changes uncommitted.
+- **Environment:** Windows; Python 3.13.7; pytest 9.1.0.
+- **Command:** `python -m pytest tests/test_metrics.py tests/test_store.py tests/test_scenario_comparison.py tests/test_reporting_export.py tests/test_scenario_serialization.py tests/test_system_integration.py tests/test_ui_results_dashboard.py tests/test_ui_run_history.py tests/test_ui_performance_charts.py --basetemp=.pytest_cache/issue30-final-verification`
+- **Result:** 186 tests collected; 185 passed, 1 xfailed, 0 failed. Process exit code: **0**. Duration: **16.86 seconds**.
+- **Static check:** `git diff --check` passed.
+- **Test modules:** `tests/test_metrics.py`, `tests/test_store.py`, `tests/test_scenario_comparison.py`, `tests/test_reporting_export.py`, `tests/test_scenario_serialization.py`, `tests/test_system_integration.py`, `tests/test_ui_results_dashboard.py`, `tests/test_ui_run_history.py`, and `tests/test_ui_performance_charts.py`.
+- **Acceptance areas covered:** Metric formulas and boundaries (delay, queue, throughput, speed, and travel time); run persistence after reopening SQLite; scenario serialization and library workflows; run comparison; run-summary and comparison CSV headers, values, precision, unavailable and non-finite values; consecutive-run auto-capture; dashboard, history, and performance-chart behavior.
+- **Expected failure / known limitation:** The single xfail is SI-D3, involving removal of the last signal plan. Saving the resulting scenario remains unsupported; the test is intentionally marked as an expected failure.
+- **TC-MET-05 metric-key clarification:** The existing comparison CSV schema was preserved and no metric-key column was added. The SRS specifies run-summary CSV requirements, while the test catalogue mentions stable metric keys. Whether that key expectation applies to comparison CSV remains pending team agreement; this point is not marked conclusively passed or failed.
+- **Evidence artifact:** No separate evidence artifact was created; this execution record captures the command and result.

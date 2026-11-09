@@ -11,7 +11,7 @@ Verified on 5 Nov 2026 by a fresh `git clone` of `main` (`cf9d928`) into an empt
 | `python -m venv .venv`, then `python -m pip install -e ".[dev]"` | Installed with no errors (Linux, Python 3.14) |
 | `python -m tms_sim run tests/data/scenario/small_valid_scenario.json` | `simulated 600.0 s \| generated 30 \| entered 30 \| completed 30 \| in network 0`, `mean travel time 16.4 s`, exit 0. Matches the README example exactly |
 | `python -m tms_sim` (GUI) | Workbench started and was still running after 8 s, with no error output |
-| `python -m pytest` | 548 passed, 2 xfailed (SI-D2 and SI-D3, see §5) |
+| `python -m pytest` | 548 passed, 2 xfailed (SI-D2 and SI-D3 at this 5 Nov baseline run; SI-D2 was subsequently addressed in Issue #30, see §5) |
 | GitHub Actions on `main` (Windows, Python 3.11) | Green after the #40 merge |
 
 Not covered: clean Windows 10 and Windows 11 machines (DEVIATIONS row 11).
@@ -38,7 +38,7 @@ Suggested order for the recording (about 2 minutes):
 
 Avoid two things during the recording:
 
-- **Loading another scenario mid-demo.** If you load one and then run it, the run is not added to history (SI-D2). Press ↺ Reset before every run.
+- **Loading another scenario mid-demo.** SI-D2 has been addressed in Issue #30. Consecutive-run capture is covered by `tests/test_system_integration.py::test_run_after_library_load_is_auto_captured` and `::test_run_after_network_modification_is_auto_captured`; see `docs/test_execution_record.md`.
 - **Deleting the only signalized intersection.** Afterwards the scenario cannot be saved (SI-D3).
 
 ## 3. Testing reports under `docs/` (owner: #34)
@@ -63,7 +63,7 @@ Evidence already in the repo: `docs/test_execution_record.md`, `docs/test_catalo
 
 | Item | Status | Where documented |
 |---|---|---|
-| SI-D2: a run after a scenario load is not auto-captured | Open (UI, #29). Strict xfail test | `docs/system_integration_report.md` |
+| SI-D2: a run after a scenario load is not auto-captured | Addressed in Issue #30; consecutive-run capture regression tests pass | `tests/test_system_integration.py::test_run_after_library_load_is_auto_captured`, `::test_run_after_network_modification_is_auto_captured`; `docs/test_execution_record.md` |
 | SI-D3: removing the last single-key signal plan blocks saving | Open (UI, #29). Strict xfail test | `docs/system_integration_report.md` |
 | TC-PERF-01: 15 FPS over a one-hour run at 1× | Not accepted (the 1× run stalled) | DEVIATIONS row 8, #12 |
 | TC-REL-01: three clean one-hour GUI runs | 1 of 3 | DEVIATIONS row 9, #12 |

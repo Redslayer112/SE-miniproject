@@ -103,11 +103,7 @@ def compute_metrics(engine: Engine | None) -> SimulationMetrics:
     vehicle_time = sum(
         float(sample.get("active_vehicle_time_s", 0.0)) for sample in samples
     )
-    if samples:
-        average_speed = speed_distance / vehicle_time if vehicle_time > 0 else None
-    else:
-        cars = getattr(engine, "cars", [])
-        average_speed = sum(car.v for car in cars) / len(cars) if cars else None
+    average_speed = speed_distance / vehicle_time if vehicle_time > 0 else None
 
     approach_ids = set(getattr(engine, "segs", {}))
     for sample in samples:
@@ -221,14 +217,10 @@ class IncrementalMetricsCalculator:
             completed_count * 3600.0 / engine.time if engine.time > 0 else None
         )
 
-        if self._sample_count:
-            average_speed = (
-                self._speed_distance / self._vehicle_time
-                if self._vehicle_time > 0 else None
-            )
-        else:
-            cars = getattr(engine, "cars", [])
-            average_speed = sum(car.v for car in cars) / len(cars) if cars else None
+        average_speed = (
+            self._speed_distance / self._vehicle_time
+            if self._vehicle_time > 0 else None
+        )
 
         approach_ids = set(getattr(engine, "segs", {}))
         approach_ids.update(self._queue_integrals)
