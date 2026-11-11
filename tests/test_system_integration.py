@@ -446,9 +446,6 @@ def test_signalized_intersection_without_plan_is_still_blocked():
         engine_from_document(doc)
 
 
-@pytest.mark.xfail(strict=True, reason="SI-D3 (UI, ui/app.py set_scenario_signal_plans): removing the "
-                   "last plan from a single-plan document writes signal_plan = {}, which "
-                   "scenario_from_dict rejects, so the scenario cannot be saved")
 def test_removing_last_plan_in_workbench_keeps_scenario_saveable(tmp_path):
     doc = load(SMALL)
     doc["network"]["intersections"][0]["control_type"] = "stop_controlled"
