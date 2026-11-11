@@ -4,7 +4,7 @@
 
 A Python-based traffic management simulation for modelling road networks, traffic signal plans, vehicle demand, and traffic flow. The project includes network and signal-plan validation, a simulation engine, scenario execution, a SQLite scenario library, run-record persistence, and automated tests.
 
-> **Development status:** Core simulation, scenario storage, and run-record storage are implemented and tested. Metrics, comparison workflows, CSV reporting, and richer interactive visualization remain areas for continued development.
+> **Project Status:** Complete 5th-semester Software Engineering capstone release. Core simulation, interactive network editing, 2D canvas visualization, live metrics dashboards, scenario library, run-record persistence, run comparison, and CSV reporting are fully implemented and verified with 597 passing automated tests. For full project details, see the [Final Project Overview](docs/FINAL_PROJECT_OVERVIEW.md).
 
 ## Table of Contents
 
@@ -56,15 +56,15 @@ The following capabilities are represented in the current repository:
 - **Automated testing:** Tests network validation, signal plans, demand generation, simulation behaviour, scenarios, storage, and UI workflows.
 - **Continuous integration:** GitHub Actions runs the test suite on pushes to `main` and pull requests.
 
-### Current UI Limitations
+### Desktop Workbench & 2D Visualization
 
-The desktop application provides the `TMS-Sim` workbench, run history and comparison, summary metrics, CSV/HTML reporting, and a scenario-library dialog. Further development can improve interactive network editing and full 2D traffic visualization.
+The desktop application provides the complete `TMS-Sim` workbench, 2D hardware-accelerated traffic visualization with mouse pan and scroll zoom, interactive network editing and validation, signal plan configuration dialogs, run history and comparison, live summary metrics, CSV reporting, and a scenario-library dialog.
 
 ## Technology Stack
 
 | **Component** | **Technology** |
 | --- | --- |
-| Programming language | Python 3.11 |
+| Programming language | Python 3.11 / 3.12 |
 | Scenario and run storage | SQLite |
 | Scenario interchange format | JSON |
 | Desktop UI framework | PySide6 |
@@ -73,7 +73,7 @@ The desktop application provides the `TMS-Sim` workbench, run history and compar
 | Continuous integration | GitHub Actions |
 | Version control | Git and GitHub |
 
-PySide6 is declared as the project's runtime dependency. `pytest` is declared as a development dependency.
+PySide6 is declared as the project's runtime dependency. `pytest` and `pytest-qt` are declared as development dependencies.
 
 ## Project Documentation
 
@@ -81,11 +81,15 @@ The repository includes the following supporting documents:
 
 | **Document** | **Location** | **Purpose** |
 | --- | --- | --- |
-| Baseline decisions (approved) | `docs/decisions/0001-baseline-proposal.md` | Team-approved decisions (issue #1) aligning requirements, architecture, and implementation |
-| Baseline amendment v1.1 | `docs/baseline_amendment_v1.1.md` | Section-by-section changes to the submitted SRS, SAD and STP |
-| Requirements Traceability Matrix draft | `docs/rtm_draft.csv` | Maps requirements to implementation and testing references |
-| Test catalogue | `docs/test_catalogue.md` | Organizes test cases and test coverage information |
-| Deviations log | `DEVIATIONS.md` | Records differences between the implementation and the SRS, SAD, and STP |
+| Final Project Overview | [`docs/FINAL_PROJECT_OVERVIEW.md`](docs/FINAL_PROJECT_OVERVIEW.md) | Comprehensive capstone overview, architecture, user workflows, and verified results |
+| Requirements Traceability Matrix | [`docs/RTM.csv`](docs/RTM.csv) | Final RTM mapping all functional, non-functional, retired, and deferred requirements |
+| Baseline decisions (approved) | [`docs/decisions/0001-baseline-proposal.md`](docs/decisions/0001-baseline-proposal.md) | Team-approved decisions (issue #1) aligning requirements, architecture, and implementation |
+| Baseline amendment v1.1 | [`docs/baseline_amendment_v1.1.md`](docs/baseline_amendment_v1.1.md) | Section-by-section changes to the submitted SRS, SAD and STP |
+| Test catalogue | [`docs/test_catalogue.md`](docs/test_catalogue.md) | Organizes test cases, verification methods, and requirement coverage |
+| Test execution record | [`docs/test_execution_record.md`](docs/test_execution_record.md) | Chronological log of full test suite runs and verified milestones |
+| System integration report | [`docs/system_integration_report.md`](docs/system_integration_report.md) | End-to-end integration workflows, resolved defects (SI-D1, SI-D2, SI-D3), and evidence |
+| Submission checklist | [`docs/submission_checklist.md`](docs/submission_checklist.md) | Pre-submission verification checklist, demo guidance, and repository audit |
+| Deviations log | [`DEVIATIONS.md`](DEVIATIONS.md) | Records differences between the implementation and the SRS, SAD, and STP |
 
 The project also includes the Software Requirements Specification (SRS), Software Architecture and Design Specification (SAD), and Software Test Plan (STP). Refer to the corresponding repository documents for their detailed requirements and design decisions.
 
@@ -165,30 +169,34 @@ SE-miniproject/
 ├── .github/
 │   └── workflows/                  # GitHub Actions CI configuration
 ├── docs/
-│   ├── decisions/                  # Baseline decision proposal
-│   ├── rtm_draft.csv               # Requirements traceability draft
-│   └── test_catalogue.md           # Test catalogue
+│   ├── decisions/                  # Architecture & baseline decision records
+│   ├── screenshots/                # Application UI & visualization screenshots
+│   ├── FINAL_PROJECT_OVERVIEW.md   # Final capstone documentation & workflows
+│   ├── RTM.csv                     # Requirements Traceability Matrix
+│   ├── test_catalogue.md           # Master test catalogue & requirement mappings
+│   ├── test_execution_record.md    # Full test suite execution history
+│   ├── system_integration_report.md# Integration test report & defect resolutions
+│   └── submission_checklist.md     # Verification & evaluation checklist
+├── fixtures/
+│   ├── valid/                      # Valid network & scenario test fixtures
+│   └── invalid/                    # Malformed test fixtures for validation
 ├── src/
 │   └── tms_sim/
-│       ├── network/                # Road network models and validation
-│       ├── signal/                 # Signal-plan models and validation
-│       ├── sim/                    # Demand generation, engine, scenarios
-│       ├── ui/                     # Desktop workbench and scenario library UI
-│       └── storage/                # SQLite scenario and run-record storage
+│       ├── network/                # Road network graph models, elements & validation
+│       ├── signal/                 # Signal-plan models, phases & controllers
+│       ├── sim/                    # Microscopic IDM engine, vehicle dynamics, demand
+│       ├── ui/                     # PySide6 Workbench, 2D canvas, dialogs & charts
+│       ├── reporting/              # Metrics calculation, aggregators & CSV export
+│       └── storage/                # SQLite scenario library & run-record repository
 ├── tests/
-│   ├── data/                       # Network, signal and scenario fixtures
-│   ├── signal/                     # Signal-plan tests
-│   ├── test_demand.py
-│   ├── test_engine.py
-│   ├── test_network.py
-│   ├── test_scenario.py
-│   ├── test_store.py               # Scenario and run-store tests
-│   ├── test_ui_scenario_library.py # Scenario library UI tests
-│   ├── test_ui_polish.py
-│   └── test_smoke.py
-├── DEVIATIONS.md                   # Specification deviations
-├── pyproject.toml                  # Project metadata and dependencies
-└── README.md
+│   ├── unit/                       # Unit tests for core components
+│   ├── integration/                # Integration test suites
+│   ├── test_ui_*.py                # PySide6 UI and visualization test suites
+│   ├── test_system_integration.py  # End-to-end integration workflows (SI-01..SI-08a)
+│   └── test_acceptance_scripts.py  # Performance and reliability runner acceptance
+├── DEVIATIONS.md                   # Specification deviations & decisions log
+├── pyproject.toml                  # Project metadata, entry points & dependencies
+└── README.md                       # Repository overview and setup guide
 ```
 
 ## Network Interface
@@ -216,40 +224,44 @@ A road segment's direction is defined by the edge from `from_intersection` to `t
 
 Run the automated test suite from the repository root:
 
-```bash
+```powershell
+$env:PYTHONPATH=".;src"
 python -m pytest
 ```
 
 The suite includes tests for:
 
-- Network validation
-- Signal-plan validation and behaviour
-- Vehicle demand generation
-- Simulation engine functionality
-- Scenario execution
-- Scenario and run-record storage
-- Scenario library UI workflows
-- Application workbench behaviour and cleanup
+- Network topology and validation rules
+- Signal-plan validation, phases, and cyclic controllers
+- Vehicle demand generation and stochastic arrivals
+- Microscopic simulation engine, car-following (IDM), and collisions
+- Scenario serialization and schema compatibility
+- Scenario library and SQLite run-record persistence
+- PySide6 desktop workbench, controls, pan/zoom, and canvas painting
+- End-to-end system integration workflows (SI-01 through SI-08a)
 
-The latest verified full test run completed with **385 tests passed** under Python 3.11, with a successful process exit.
+The latest verified full test run completed with **597 tests passed** under Python 3.12 (and Python 3.11 in CI), with 0 failures, 0 xfailed, and a clean process exit (exit code 0).
 
 ### Continuous Integration
 
-GitHub Actions runs the test suite on pushes to `main` and pull requests. The workflow uses Windows and Python 3.11, installs the project with its development dependencies, and runs `python -m pytest`. The latest workflow run for commit `89b8366` completed successfully.
+GitHub Actions runs the test suite on pushes to `main` and pull requests. The workflow uses Windows and Python 3.11, installs the project with its development dependencies, and runs `pytest`.
 
 ## Development Status and Future Work
 
-Implementation and testing are ongoing. Future work may include:
+### Implemented in Final Capstone Release
+- **Interactive road network editing:** Add, delete, select, and reposition intersections and directed road segments directly within the PySide6 Workbench.
+- **Topological network validation:** Automated checks prevent invalid graph states prior to simulation start.
+- **2D traffic visualization:** Real-time rendering of lanes, vehicles, queues, and signal aspects with mouse pan and scroll zoom.
+- **Simulation controls:** Full Play, Pause, Step, Stop, and Reset controls with variable speed multipliers (0.5x–4.0x).
+- **Traffic metrics & live dashboards:** Real-time HUD and Matplotlib charts tracking delay, throughput, queue lengths, and mean velocities.
+- **Run persistence & comparative analytics:** Complete SQLite run history with scenario snapshots, side-by-side run comparisons, and CSV export.
 
-- Interactive road network editing.
-- Full 2D visualization of traffic flow and signal states.
-- Traffic performance metrics and comparison between simulation runs.
-- CSV reporting and export of simulation results.
-- Additional scenario configurations and traffic models.
-- Expanded integration, usability, and performance testing.
-- Continued alignment between implementation, requirements, architecture, and the test plan.
-
-Scenario storage and run-record persistence are already implemented. Check `DEVIATIONS.md`, the test catalogue, and project documentation for current implementation status and outstanding deviations.
+### Future Work & Extensions
+- Actuated / adaptive traffic signal control algorithms (e.g., Webster cycle optimization, Green Wave coordination).
+- Multi-class vehicle kinematics (buses, trucks, emergency vehicle preemption).
+- Ingestion of real-world OpenStreetMap (OSM) or SUMO network files.
+- 3D rendering viewport utilizing modern OpenGL/Vulkan pipelines.
+- Formal usability studies across wider multi-user cohorts.
 
 ## Institution and Course
 

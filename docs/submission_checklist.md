@@ -36,17 +36,16 @@ Suggested order for the recording (about 2 minutes):
 8. **Export.** Use 📄 Export CSV and 🌐 Export HTML, then open the CSV. *(TMS-F-054)*
 9. **Library.** Press Ctrl+L to open the Scenario Library, then save, duplicate and load a scenario. *(TMS-F-060)*
 
-Avoid two things during the recording:
+Avoid one thing during the recording:
 
-- **Loading another scenario mid-demo.** SI-D2 has been addressed in Issue #30. Consecutive-run capture is covered by `tests/test_system_integration.py::test_run_after_library_load_is_auto_captured` and `::test_run_after_network_modification_is_auto_captured`; see `docs/test_execution_record.md`.
-- **Deleting the only signalized intersection.** Afterwards the scenario cannot be saved (SI-D3).
+- **Usability note:** Press ↺ Reset before starting another run to reset the live simulation timeline and vehicle state cleanly. SI-D2 (run auto-capture after scenario load) and SI-D3 (scenario saving after deleting the only signal plan) are both resolved in code.
 
 ## 3. Testing reports under `docs/` (owner: #34)
 
-- [ ] Unit Test Report
-- [ ] System Validation Report. Its source is `docs/system_integration_report.md` (#33), which is in the repo
-- [ ] Code Coverage Report, generated from real tool output
-- [ ] Branch Coverage Report, generated from real tool output
+- [x] Unit Test Report (`docs/unit_test_report_2026-11-06.md`)
+- [x] System Validation Report (`docs/system_validation_report_2026-11-06.md`)
+- [x] Code Coverage Report (`docs/code_coverage_report_2026-11-06.md`)
+- [x] Branch Coverage Report (`docs/branch_coverage_report_2026-11-06.md`)
 
 Evidence already in the repo: `docs/test_execution_record.md`, `docs/test_catalogue.md`, `docs/issue10_acceptance.md`, `docs/issue12_acceptance.md` and `docs/system_integration_report.md`. The engine unit and regression results are in the description of PR #38.
 
@@ -55,20 +54,20 @@ Evidence already in the repo: `docs/test_execution_record.md`, `docs/test_catalo
 - [x] Baseline decisions approved: `docs/decisions/0001-baseline-proposal.md` (#1)
 - [x] SRS/SAD/STP amendment: `docs/baseline_amendment_v1.1.md` (#26)
 - [x] Deviations from SRS/SAD/STP: `DEVIATIONS.md`
-- [ ] `docs/FINAL_PROJECT_OVERVIEW.md`
-- [ ] RTM final pass. `docs/rtm_draft.csv` was updated by #26, #39 and #40
-- [ ] README "Development status" note. It still says metrics, comparison and CSV "remain areas for continued development", but all three are implemented and tested
+- [x] `docs/FINAL_PROJECT_OVERVIEW.md`
+- [x] RTM final pass: `docs/RTM.csv` (supersedes `rtm_draft.csv`)
+- [x] README "Development status" note updated to reflect implemented status
 
 ## 5. Known limitations and unresolved defects (disclosed)
 
 | Item | Status | Where documented |
 |---|---|---|
-| SI-D2: a run after a scenario load is not auto-captured | Addressed in Issue #30; consecutive-run capture regression tests pass | `tests/test_system_integration.py::test_run_after_library_load_is_auto_captured`, `::test_run_after_network_modification_is_auto_captured`; `docs/test_execution_record.md` |
-| SI-D3: removing the last single-key signal plan blocks saving | Open (UI, #29). Strict xfail test | `docs/system_integration_report.md` |
-| TC-PERF-01: 15 FPS over a one-hour run at 1× | Not accepted (the 1× run stalled) | DEVIATIONS row 8, #12 |
-| TC-REL-01: three clean one-hour GUI runs | 1 of 3 | DEVIATIONS row 9, #12 |
-| TC-UX-01: usability test | Not performed | DEVIATIONS row 10, #12 |
-| TC-PORT-01: clean Windows 10/11 machines | Not performed | DEVIATIONS row 11, #12 |
+| SI-D2: a run after a scenario load is not auto-captured | Resolved (Issue #30); verified in `test_system_integration.py` | `src/tms_sim/ui/app.py` `_reset_run_capture_state()`; `docs/test_execution_record.md` |
+| SI-D3: removing the last single-key signal plan blocks saving | Resolved (UI, #29); verified in `test_system_integration.py` & `test_ui_issue29_stabilization.py` | `src/tms_sim/ui/app.py` `set_scenario_signal_plans()`; `docs/system_integration_report.md` |
+| TC-PERF-01: 15 FPS over a one-hour run at 1× | Accepted via controlled rerun on 2026-11-09 (15.96 FPS, acceptance_eligible=true) | `artifacts/issue12/tc_perf_01_full_run_controlled_retry2_2026-11-09.json`; `docs/issue12_acceptance.md` |
+| TC-REL-01: three clean one-hour runs | Verified for headless engine reliability (3 runs: seeds 42, 43, 44; 3,600s each, exit 0) | `artifacts/issue12/tc_rel_01/supervisor_reliability_20261111T120702_740960Z.json`; `docs/issue12_acceptance.md` |
+| TC-UX-01: usability test | Not performed (no new-user participants available) | DEVIATIONS row 10, #12 |
+| TC-PORT-01: clean Windows 10/11 machines | Verified on Windows 11 host and CI runner; clean multi-version matrix unperformed | DEVIATIONS row 11, #12 |
 | Scope cuts: accounts and roles, sharing, 8× and unbounded speed, OD matrix, F-021 and F-031 | Deferred or retired by team decision | DEVIATIONS rows 1–7 and 12 |
 | Gap acceptance ignores stationary conflicting vehicles. The leader search is O(n²) | By design (decision 0001) | `src/tms_sim/sim/engine.py` |
 
@@ -78,8 +77,8 @@ Evidence already in the repo: `docs/test_execution_record.md`, `docs/test_catalo
 - [x] GitHub Actions run on every PR. Members raise PRs and the repo owner reviews and merges
 - [x] Sprint 1 video: `demo/sprint1_demo.mp4`
 - [ ] Sprint 2 video (2 min): `demo/sprint2_demo.mp4`, following §2
-- [ ] #34 reports merged (§3)
-- [ ] #35 documentation merged (§4)
+- [x] #34 reports merged (§3)
+- [x] #35 documentation merged (§4)
 - [ ] #12 closed, with the blocked tests recorded as deviations
 - [ ] Demo rehearsed with all four members
 - [ ] Development frozen. Tag the final `main` commit (for example `v1.0`)

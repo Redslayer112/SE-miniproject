@@ -180,3 +180,20 @@ the new commit and actual result.
 - **Expected failure / known limitation:** The single xfail is SI-D3, involving removal of the last signal plan. Saving the resulting scenario remains unsupported; the test is intentionally marked as an expected failure.
 - **TC-MET-05 metric-key clarification:** The existing comparison CSV schema was preserved and no metric-key column was added. The SRS specifies run-summary CSV requirements, while the test catalogue mentions stable metric keys. Whether that key expectation applies to comparison CSV remains pending team agreement; this point is not marked conclusively passed or failed.
 - **Evidence artifact:** No separate evidence artifact was created; this execution record captures the command and result.
+
+## Issue #35 / Issue #29 Sprint 3 Full-Suite Execution (2026-11-11)
+
+- **Date:** 2026-11-11
+- **Branch:** `main`
+- **Commit tested:** `af00f0422fc64177c0987647e35d76f4aad24da6`
+- **Scope:** Full repository automated test suite spanning core engine, network, signals, storage, metrics, export, UI workbench, 2D canvas visualization, integration workflows, and Issue #29 UI stabilization.
+- **Environment:** Windows 11 build 26300; project virtualenv `.venv` (CPython 3.12.4, pytest 9.2.0, PySide6 6.12.0).
+- **Exact command:** `$env:PYTHONPATH=".;src"; .\.venv\Scripts\pytest`
+- **Result:** **597 collected; 597 passed; 0 failed; 0 skipped; 0 xfailed**.
+- **Duration:** 27.53 seconds.
+- **Process exit code:** **0** (clean shutdown without abnormal exit).
+- **Key milestones verified:**
+  1. **Defect SI-D2 (Auto-capture after scenario reload):** Passing across `tests/test_system_integration.py::test_run_after_library_load_is_auto_captured`, `::test_run_after_network_modification_is_auto_captured`, and `tests/test_ui_issue29_stabilization.py::test_si_d2_auto_capture_after_scenario_reload`.
+  2. **Defect SI-D3 (Single-plan removal schema compliance):** Passing across `tests/test_system_integration.py::test_removing_last_plan_in_workbench_keeps_scenario_saveable` and `tests/test_ui_issue29_stabilization.py::test_si_d3_single_plan_removal_produces_valid_empty_plans`. Strict xfail markers removed.
+  3. **UI Lifecycle & Stabilization:** Passing across `tests/test_ui_issue29_stabilization.py` covering Ready -> Running -> Paused -> Resumed -> Completed -> Reset transitions, empty network rendering safety, invalid network blocking, and canvas view controls.
+  4. **Performance & Reliability:** Controlled 1.0x 1-hour rerun achieved 15.96 FPS (`artifacts/issue12/tc_perf_01_full_run_controlled_retry2_2026-11-09.json`); supervised headless engine reliability verified 3/3 1-hour runs without leak or timeout (`artifacts/issue12/tc_rel_01/supervisor_reliability_20261111T120702_740960Z.json`).

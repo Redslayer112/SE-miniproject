@@ -17,7 +17,7 @@
 | §4.5 TMS-F-040 | Car-following is the IDM with `v0` = segment speed limit, `a_max` 1.5 m/s², `b` 2.0 m/s², `s0` 2.0 m, `T` 1.5 s, braking floor 9 m/s², vehicle length 5.0 m. Signals: only green is green. A vehicle that physically cannot stop when the light changes may clear on yellow. Gap acceptance: 3.0 s critical gap at stop- and yield-controlled intersections (see decision record 6–6b) | 6 |
 | §4.3 TMS-F-022 | Conflicting movements: crossing or merging paths conflict. The same-approach exception applies only toward different receiving segments. A missing position is a located error. Left-hand traffic, y-up coordinates | 9 |
 | §5 TMS-NF-001..004 | Measurable criteria: FPS = average over the full one-hour run on the reference hardware (i5-11400H, 16 GB). The reference scenario is `fixtures/valid/performance_10_intersections.json`. Reliability = three clean one-hour runs. Usability = moderated new-user test. Portability = clean Windows 10 and 11 runs | 3 |
-| §8 RTM | Superseded by `docs/rtm_draft.csv` | 4 |
+| §8 RTM | Superseded by `docs/RTM.csv` | 4 |
 
 ## SAD
 
@@ -35,5 +35,5 @@
 | §5.1 Security validation | Limited to safe local input and storage: oversized, malformed and wrong-version scenario files are rejected before parsing or storing | 1 |
 | §6 Test environment, *Tools* | **GitHub Issues and GitHub Actions** (Windows, Python 3.11) replace Jira. The test framework is pytest | 7 |
 | §7 Test schedule | Replace the September dates: execution follows the sprints. Sprint 1 ran 19–27 Oct 2026 and Sprint 2 runs 27 Oct–6 Nov 2026. Acceptance evidence is in `docs/test_execution_record.md` and `artifacts/` | 7 |
-| §13 Traceability | Superseded by `docs/rtm_draft.csv`, which adds rows for TMS-F-011/013/042/051/052 | 4 |
+| §13 Traceability | Superseded by `docs/RTM.csv`, which adds rows for TMS-F-011/013/042/051/052 | 4 |
 | §14 Metrics & reporting | Each test row reports pass/fail plus the pytest process exit status from CI | 3 |
