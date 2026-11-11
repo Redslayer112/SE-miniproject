@@ -438,6 +438,43 @@ def test_incremental_calculator_starts_fresh_after_real_engine_reset():
     assert after_reset.average_queue_length_by_approach == {}
 
 
+def test_incremental_generated_count_uses_sorted_departure_boundaries():
+    engine = Engine(
+        {"R": Segment(25.0, 10.0)},
+        {("R", "straight"): ["R"]},
+        [
+            Vehicle(4, "R", "straight", 3.0),
+            Vehicle(2, "R", "straight", 1.0),
+            Vehicle(1, "R", "straight", 1.0),
+            Vehicle(3, "R", "straight", 2.0),
+            Vehicle(5, "R", "straight", 4.0),
+        ],
+        duration=5.0,
+    )
+    calculator = IncrementalMetricsCalculator()
+
+    assert [vehicle.depart_time for vehicle in engine.vehicles] == [
+        1.0, 1.0, 2.0, 3.0, 4.0,
+    ]
+    for sim_time, expected_generated in (
+        (0.999, 0),
+        (1.0, 2),
+        (1.5, 2),
+        (2.0, 3),
+        (4.0, 5),
+    ):
+        engine.time = sim_time
+        actual = calculator.calculate(engine)
+        expected = compute_metrics(engine)
+
+        assert actual.vehicles_generated == expected_generated
+        assert_metrics_match(actual, expected)
+
+    engine.finished = True
+    completed = calculator.calculate(engine)
+    assert completed.vehicles_generated == len(engine.vehicles)
+
+
 def test_incremental_calculator_repeatedly_handles_empty_real_engine_history():
     engine = Engine(
         {"R": Segment(25.0, 10.0)},

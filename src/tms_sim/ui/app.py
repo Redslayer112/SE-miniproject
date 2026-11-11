@@ -1137,10 +1137,18 @@ class Workbench(QMainWindow):
         self.is_dirty: bool = False
         self.dirty: bool = False
         self.save_prompt_handler = None
+        self._pending_close_initiator: str | None = None
+        self._benchmark_close_event_observer = None
+        self._benchmark_close_event_tokens: list[str] = []
         self._is_restoring_history: bool = False
         self._pending_edit_description: str = ""
         # Collected without changing UI behaviour; acceptance tooling inspects it.
         self.storage_errors: list[dict[str, str]] = []
+        # Session-scoped, transition-only audit data used by acceptance tooling.
+        self.pause_provenance: list[dict] = []
+        self._focus_widget_session_ids: dict[int, int] = {}
+        self._focus_widget_session_refs: dict[int, object] = {}
+        self._next_focus_widget_session_id = 1
 
         self.scenario_data = {}
         self.engine = None
@@ -1415,7 +1423,7 @@ class Workbench(QMainWindow):
         file_menu.addSeparator()
         exit_action = file_menu.addAction("E&xit")
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(self._close_from_exit_action)
 
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
@@ -2090,7 +2098,9 @@ class Workbench(QMainWindow):
         self.btn_reset.setToolTip("Reset simulation to initial state (R)")
 
         self.btn_play.clicked.connect(self.start_simulation)
-        self.btn_pause.clicked.connect(self.pause_simulation)
+        self.btn_pause.clicked.connect(
+            lambda checked=False: self.pause_simulation(source="pause_button")
+        )
         self.btn_step.clicked.connect(self.step_simulation)
         self.btn_reset.clicked.connect(self.reset_simulation)
         self.speed_box.currentTextChanged.connect(self.change_speed)
@@ -3171,6 +3181,9 @@ class Workbench(QMainWindow):
                 self.update_undo_redo_actions()
 
         self.timer.stop()
+        if self.engine is not None and self.engine.running:
+            self._record_pause_provenance("network_modified")
+            self.engine.pause(reason="network_modified", source="workbench")
         self.update_metrics()
         self.canvas.reparse_signal_plans()
         self.refresh_demand_ui()
@@ -3239,11 +3252,43 @@ class Workbench(QMainWindow):
         self.status_label.setText("Simulation running")
         self.update_metrics()
 
-    def pause_simulation(self):
+    def _focused_widget_provenance(self):
+        focused = QApplication.focusWidget()
+        if focused is None:
+            return None
+        object_key = id(focused)
+        session_id = self._focus_widget_session_ids.get(object_key)
+        if session_id is None or self._focus_widget_session_refs.get(session_id) is not focused:
+            session_id = self._next_focus_widget_session_id
+            self._next_focus_widget_session_id += 1
+            self._focus_widget_session_ids[object_key] = session_id
+            # A strong reference prevents id reuse for this Workbench session.
+            self._focus_widget_session_refs[session_id] = focused
+        return {
+            "session_id": session_id,
+            "class_name": type(focused).__name__,
+            "object_name": focused.objectName(),
+        }
+
+    def _record_pause_provenance(self, source: str):
+        self.pause_provenance.append({
+            "sequence": len(self.pause_provenance) + 1,
+            "simulation_time_s": round(
+                float(getattr(self.engine, "time", 0.0)), 3
+            ) if self.engine is not None else None,
+            "reason": source,
+            "source": source,
+            "focused_widget": self._focused_widget_provenance(),
+        })
+
+    def pause_simulation(self, source="programmatic"):
+        if source not in {"pause_button", "space_shortcut", "programmatic", "undo", "redo"}:
+            source = "unknown"
+        self._record_pause_provenance(source)
         if self.timer.isActive():
             self.timer.stop()
         if self.engine is not None:
-            self.engine.pause()
+            self.engine.pause(reason=source, source=source)
         self.status_label.setText("Simulation paused")
         self.update_metrics()
 
@@ -3261,7 +3306,8 @@ class Workbench(QMainWindow):
             return
         if self.timer.isActive():
             self.timer.stop()
-        self.engine.pause()
+        self._record_pause_provenance("step_action")
+        self.engine.pause(reason="step_action", source="workbench")
         self.engine.step()
         self.canvas.update()
         self.update_metrics(force_history_sample=True)
@@ -3282,6 +3328,8 @@ class Workbench(QMainWindow):
             self.timer.stop()
         self._reset_run_capture_state()
         if self.engine is not None:
+            if self.engine.running:
+                self._record_pause_provenance("reset")
             self.engine.reset()
             if hasattr(self, "speed_box"):
                 self.change_speed(self.speed_box.currentText())
@@ -3318,7 +3366,7 @@ class Workbench(QMainWindow):
         if isinstance(focused, (QLineEdit, QSpinBox)):
             return
         if self.engine is not None and getattr(self.engine, "running", False):
-            self.pause_simulation()
+            self.pause_simulation(source="space_shortcut")
         elif hasattr(self, "btn_play") and self.btn_play.isEnabled():
             self.start_simulation()
 
@@ -3581,6 +3629,9 @@ class Workbench(QMainWindow):
             return False
 
         self.timer.stop()
+        if self.engine is not None and self.engine.running:
+            self._record_pause_provenance("scenario_load")
+            self.engine.pause(reason="scenario_load", source="workbench")
         self.scenario_path = path
         self.scenario_data = new_data
         self._reset_run_capture_state()
@@ -3766,11 +3817,30 @@ class Workbench(QMainWindow):
 
     def closeEvent(self, event):
         """Handle application close event, prompting to save unsaved changes."""
+        event_tokens = self._benchmark_close_event_tokens
+        event_token = event_tokens.pop() if event_tokens else None
         if self.maybe_save_changes():
             self.timer.stop()
+            if self.engine is not None and self.engine.running:
+                self._record_pause_provenance("window_close")
+                self.engine.pause(reason="window_close", source="workbench")
             event.accept()
         else:
             event.ignore()
+        observer = self._benchmark_close_event_observer
+        if observer is not None:
+            try:
+                observer(event_token, bool(event.isAccepted()))
+            except Exception:
+                logger.exception("Benchmark close-event diagnostic callback failed")
+
+    def _close_from_exit_action(self, checked: bool = False):
+        """Close through the File > Exit action while exposing its source to diagnostics."""
+        self._pending_close_initiator = "file_menu_exit"
+        try:
+            self.close()
+        finally:
+            self._pending_close_initiator = None
 
     @property
     def can_undo(self) -> bool:
@@ -3818,7 +3888,7 @@ class Workbench(QMainWindow):
         if not hasattr(self, "history_manager") or not self.history_manager.can_undo:
             return False
 
-        self.pause_simulation()
+        self.pause_simulation(source="undo")
         result = self.history_manager.undo()
         if result is None:
             return False
@@ -3859,7 +3929,7 @@ class Workbench(QMainWindow):
         if not hasattr(self, "history_manager") or not self.history_manager.can_redo:
             return False
 
-        self.pause_simulation()
+        self.pause_simulation(source="redo")
         result = self.history_manager.redo()
         if result is None:
             return False

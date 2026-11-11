@@ -1,0 +1,1 @@
+{"seed": 43, "status": "Passed", "output": "C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject-main\\issue12-4x-work\\artifacts\\issue12\\tc_rel_01\\runner_seed43_20261111T120702_740960Z.json", "wall_clock_seconds": 2.2842613000011625}

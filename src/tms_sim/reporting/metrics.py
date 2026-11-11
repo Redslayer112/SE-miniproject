@@ -1,6 +1,7 @@
 """Run metrics recomputed from the engine's lifecycle and measurement event logs."""
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -202,8 +203,13 @@ class IncrementalMetricsCalculator:
             "Running" if engine.running else "Paused" if engine.time > 0 else "Ready"
         )
         total_scheduled = len(engine.vehicles)
-        generated = total_scheduled if engine.finished else sum(
-            vehicle.depart_time <= engine.time for vehicle in engine.vehicles
+        # Engine sorts its demand list by departure time at construction.
+        # Count arrivals at the current time in O(log n) rather than scanning every
+        # scheduled vehicle on every UI refresh.
+        generated = total_scheduled if engine.finished else bisect_right(
+            engine.vehicles,
+            engine.time,
+            key=lambda vehicle: vehicle.depart_time,
         )
 
         completed_count = len(self._completed_ids)

@@ -23,9 +23,11 @@ Covers:
 
 import json
 from pathlib import Path
+import time
 import pytest
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from measure_gui_fps import InputEventRecorder
 
 from tms_sim.sim.serialization import (
     ScenarioFormatError,
@@ -329,18 +331,69 @@ def test_unsaved_changes_save_discard_cancel_decisions(workbench, tmp_path, monk
 def test_closing_application_respects_unsaved_changes(workbench):
     """Verify closeEvent ignores close when user cancels and accepts when user discards."""
     workbench.set_dirty(True)
+    close_outcomes = []
+    workbench._benchmark_close_event_observer = (
+        lambda _event_token, accepted: close_outcomes.append(accepted)
+    )
 
     # User cancels close
     workbench.save_prompt_handler = lambda: "cancel"
     ev_cancel = QCloseEvent()
     workbench.closeEvent(ev_cancel)
     assert ev_cancel.isAccepted() is False
+    assert close_outcomes[-1] is False
 
     # User discards changes
     workbench.save_prompt_handler = lambda: "discard"
     ev_discard = QCloseEvent()
     workbench.closeEvent(ev_discard)
     assert ev_discard.isAccepted() is True
+    assert close_outcomes[-1] is True
+
+
+def test_nested_close_events_keep_outcomes_correlated(workbench, qapp, monkeypatch):
+    recorder = InputEventRecorder(window=workbench)
+    recorder.started_at = time.perf_counter()
+    workbench._benchmark_close_event_observer = recorder.record_close_outcome
+    qapp.installEventFilter(recorder)
+    save_prompt_calls = 0
+
+    def reentrant_save_decision():
+        nonlocal save_prompt_calls
+        save_prompt_calls += 1
+        if save_prompt_calls == 1:
+            QApplication.sendEvent(workbench, QCloseEvent())
+            return True
+        return False
+
+    monkeypatch.setattr(workbench, "maybe_save_changes", reentrant_save_decision)
+    try:
+        QApplication.sendEvent(workbench, QCloseEvent())
+    finally:
+        qapp.removeEventFilter(recorder)
+        workbench._benchmark_close_event_observer = None
+
+    assert len(recorder.window_close_events) == 2
+    records = recorder.window_close_events
+    assert records[0]["event_token"] != records[1]["event_token"]
+    assert [record["close_event_accepted"] for record in records] == [True, False]
+    assert workbench._benchmark_close_event_tokens == []
+
+
+def test_file_exit_action_exposes_known_close_initiator(workbench, monkeypatch):
+    observed = []
+    monkeypatch.setattr(
+        workbench,
+        "close",
+        lambda: observed.append(workbench._pending_close_initiator),
+    )
+
+    file_menu = workbench.menuBar().actions()[0].menu()
+    exit_action = next(action for action in file_menu.actions() if action.text() == "E&xit")
+    exit_action.trigger()
+
+    assert observed == ["file_menu_exit"]
+    assert workbench._pending_close_initiator is None
 
 
 def test_open_scenario_dialog_cancelled_when_user_cancels_save(workbench, monkeypatch):

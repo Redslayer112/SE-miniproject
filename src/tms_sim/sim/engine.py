@@ -1,3 +1,4 @@
+
 """Simulation Engine (SAD §3.4; TMS-F-040/041/042). Headless: no Qt, no randomness (demand is input).
 
 Model values are APPROVED in docs/decisions/0001-baseline-proposal.md (#1):
@@ -10,6 +11,7 @@ Network/signal inputs are plain data so the network (#3) and signal (#5) owners 
   signals     (from segment, to segment) -> green(t) -> bool, for that movement's stop line
   yields_to   segment id -> segment ids whose approaching vehicles must be given way to
 """
+
 import math
 from dataclasses import dataclass
 from typing import Callable
@@ -49,18 +51,34 @@ class Car:
 
 
 class Engine:
-    def __init__(self, segments, routes, vehicles: list[Vehicle], signals=None, yields_to=None,
-                 duration: float = 3600.0, params: Params = Params(), on_finish: Callable | None = None):
-        self.segs, self.routes, self.vehicles = segments, routes, sorted(vehicles, key=lambda v: v.depart_time)
+    def __init__(
+        self,
+        segments,
+        routes,
+        vehicles: list[Vehicle],
+        signals=None,
+        yields_to=None,
+        duration: float = 3600.0,
+        params: Params = Params(),
+        on_finish: Callable | None = None,
+    ):
+        self.segs, self.routes, self.vehicles = (
+            segments,
+            routes,
+            sorted(vehicles, key=lambda v: v.depart_time),
+        )
         self.signals, self.yields_to = signals or {}, yields_to or {}
         self.duration, self.p, self.on_finish = duration, params, on_finish
+        self.running_state_transitions: list[dict] = []
+        self._running = False
         self.reset()
 
     # ---- controls (TMS-F-041) ----
     def reset(self):
         """Back to t = 0 with the same inputs; nothing random lives here so reruns are identical."""
-        self.time, self.running, self.finished, self.speed = 0.0, False, False, 1
+        self.time, self.finished, self.speed = 0.0, False, 1
         self._steps = 0
+        self._set_running(False, "reset", "engine")
         self.cars: list[Car] = []
         self.exited: list[Car] = []
         self.events: list[tuple] = []  # (time, vehicle id, "spawn" | "exit", segment id)
@@ -71,10 +89,33 @@ class Engine:
         self._wall = 0.0
 
     def start(self):
-        self.running = not self.finished
+        self._set_running(not self.finished, "start", "engine")
 
-    def pause(self):
-        self.running = False
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    @running.setter
+    def running(self, value: bool):
+        """Retain the public attribute API and audit direct/unknown transitions."""
+        self._set_running(value, "unknown_direct_assignment", "unknown")
+
+    def _set_running(self, value: bool, reason: str, source: str):
+        value = bool(value)
+        previous = getattr(self, "_running", False)
+        self._running = value
+        if previous != value:
+            self.running_state_transitions.append({
+                "sequence": len(self.running_state_transitions) + 1,
+                "simulation_time_s": round(float(getattr(self, "time", 0.0)), 3),
+                "from_running": previous,
+                "to_running": value,
+                "reason": reason,
+                "source": source,
+            })
+
+    def pause(self, reason: str = "programmatic", source: str | None = None):
+        self._set_running(False, reason, source or "programmatic")
 
     def set_speed(self, multiplier):
         if multiplier not in SPEEDS:
@@ -100,16 +141,21 @@ class Engine:
         acc = {c.id: self._accel(c, stop[c.id]) for c in self.cars}
         distance_this_step = 0.0
         active_vehicle_time = 0.0
+
         for c in self.cars:
             v = max(0.0, c.v + acc[c.id] * p.dt)
             distance = (c.v + v) / 2 * p.dt
             if c.leg + 1 == len(c.route):
-                distance = min(distance, max(0.0, self.segs[c.route[c.leg]].length - c.x))
+                distance = min(
+                    distance,
+                    max(0.0, self.segs[c.route[c.leg]].length - c.x),
+                )
             c.x += distance
             c.distance_m += distance
             distance_this_step += distance
             active_vehicle_time += p.dt
             c.v = v
+
         for c in list(self.cars):
             length = self.segs[c.route[c.leg]].length
             while c.x >= length:
@@ -123,14 +169,18 @@ class Engine:
                     exit_time = self.time + p.dt
                     self.events.append((exit_time, c.id, "exit", c.route[c.leg]))
                     self.metric_events.append({
-                        "type": "exit", "time": exit_time, "vehicle_id": c.id,
-                        "segment_id": c.route[c.leg], "distance_m": c.distance_m,
+                        "type": "exit",
+                        "time": exit_time,
+                        "vehicle_id": c.id,
+                        "segment_id": c.route[c.leg],
+                        "distance_m": c.distance_m,
                         "free_flow_time_s": self._free_flow_time(c.route),
                     })
                     break
                 c.x -= length
                 c.leg += 1
                 length = self.segs[c.route[c.leg]].length
+
         self._steps += 1
         self.time = round(self._steps * p.dt, 9)  # counter, not +=: no float drift
         queues: dict[str, int] = {}
@@ -138,14 +188,19 @@ class Engine:
             if c.v < 0.5:
                 segment_id = c.route[c.leg]
                 queues[segment_id] = queues.get(segment_id, 0) + 1
+
         self.metric_events.append({
-            "type": "sample", "time": self.time, "dt": p.dt,
+            "type": "sample",
+            "time": self.time,
+            "dt": p.dt,
             "speed_distance_m": distance_this_step,
             "active_vehicle_time_s": active_vehicle_time,
             "queue_by_approach": queues,
         })
+
         if self.time >= self.duration:
-            self.finished, self.running = True, False
+            self.finished = True
+            self._set_running(False, "completion", "engine")
             if self.on_finish:
                 self.on_finish(self)  # exactly once per run: step() is a no-op once finished
 
@@ -165,17 +220,22 @@ class Engine:
             self.cars.append(Car(veh.id, route, 0, p.length, v0, self.time))
             self.events.append((self.time, veh.id, "spawn", route[0]))
             self.metric_events.append({
-                "type": "spawn", "time": self.time, "vehicle_id": veh.id,
+                "type": "spawn",
+                "time": self.time,
+                "vehicle_id": veh.id,
                 "segment_id": route[0],
                 "free_flow_time_s": self._free_flow_time(route),
             })
 
     def _free_flow_time(self, route: list[str]) -> float:
         """Free-flow time for the route distance from the spawn point to its exit."""
-        return max(0.0, sum(
-            (self.segs[segment_id].length / self.segs[segment_id].speed_limit)
-            for segment_id in route
-        ) - self.p.length / self.segs[route[0]].speed_limit)
+        return max(
+            0.0,
+            sum(
+                self.segs[segment_id].length / self.segs[segment_id].speed_limit
+                for segment_id in route
+            ) - self.p.length / self.segs[route[0]].speed_limit,
+        )
 
     # ---- model ----
     def _stop_line(self, c: Car):
@@ -202,14 +262,21 @@ class Engine:
         for other in self.yields_to.get(seg, ()):
             for o in self.cars:
                 # ponytail: stationary conflicting vehicles are ignored (no deadlock); revisit with #1's rule
-                if o.route[o.leg] == other and o.v > 0.5 and (self.segs[other].length - o.x) / o.v < self.p.critical_gap:
+                if (
+                    o.route[o.leg] == other
+                    and o.v > 0.5
+                    and (self.segs[other].length - o.x) / o.v < self.p.critical_gap
+                ):
                     return True
         return False
 
     def _leader(self, c: Car):
         # ponytail: O(n^2) scan; index cars per segment if NF-001 (2000 vehicles) is missed
         p, seg = self.p, c.route[c.leg]
-        ahead = [o for o in self.cars if o is not c and o.route[o.leg] == seg and o.x > c.x]
+        ahead = [
+            o for o in self.cars
+            if o is not c and o.route[o.leg] == seg and o.x > c.x
+        ]
         if ahead:
             o = min(ahead, key=lambda o: o.x)
             return o.x - p.length - c.x, o.v
@@ -231,6 +298,10 @@ class Engine:
         if gaps:
             s, vl = min(gaps)
             s = max(s, 0.1)
-            s_star = p.s0 + max(0.0, c.v * p.headway + c.v * (c.v - vl) / (2 * math.sqrt(p.a_max * p.b)))
+            s_star = p.s0 + max(
+                0.0,
+                c.v * p.headway
+                + c.v * (c.v - vl) / (2 * math.sqrt(p.a_max * p.b)),
+            )
             a -= p.a_max * (s_star / s) ** 2
         return max(a, -p.max_brake)
