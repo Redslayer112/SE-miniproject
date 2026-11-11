@@ -8,13 +8,15 @@ Scenario JSON is the shared fixture format (fixtures/valid/small_valid_scenario.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from tms_sim.network import ControlType, Network, NetworkService
+from tms_sim.network.validation import ERROR, WARNING, ValidationIssue, ValidationResult
 from tms_sim.network.serialization import network_from_dict
 from tms_sim.signal import ConflictCheckUnavailable, SignalPlan, SignalService, movements_conflict
 from tms_sim.signal.serialization import plan_from_dict
-from tms_sim.sim.demand import DemandError, generate_vehicles
+from tms_sim.sim.demand import DemandError, demand_issues, generate_vehicles
 from tms_sim.sim.engine import Engine, Params, Segment
 
 YIELDING = {ControlType.STOP_CONTROLLED, ControlType.YIELD_CONTROLLED}
@@ -44,6 +46,57 @@ def _route(first, outgoing):
     return route
 
 
+def _real(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def validate_scenario(network: Network, demand: dict, simulation: dict) -> ValidationResult:
+    """Scenario-level checks (SRS §4.4 schema, baseline amendment v1.1), every problem at once.
+
+    A network entry is a segment no permitted turning movement leads onto; demand on any other
+    segment is only a warning, because nothing in the baseline makes it blocking.
+    """
+    issues: list[ValidationIssue] = []
+
+    def add(code, message, etype, eid, severity=ERROR):
+        issues.append(ValidationIssue(code, message, etype, eid, severity))
+
+    dt = simulation.get("time_step_s", Params.dt)
+    if not _real(dt) or not 0.1 <= dt <= 1.0:
+        add("INVALID_TIME_STEP", f"time_step_s must be 0.1-1.0 s (TMS-F-040), got {dt!r}", "simulation", "time_step_s")
+    duration = simulation.get("duration_s", 3600.0)
+    if not _real(duration) or duration <= 0:
+        add("INVALID_DURATION", f"duration_s must be > 0 s, got {duration!r}", "simulation", "duration_s")
+    seed = simulation.get("seed", 0)
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        add("INVALID_SEED", f"seed must be an integer, got {seed!r}", "simulation", "seed")
+
+    rates = demand.get("arrival_rates_vehicles_per_hour", {})
+    raw_ratios = demand.get("turning_ratios", {})
+    if not isinstance(rates, dict) or not isinstance(raw_ratios, dict):
+        add("INVALID_DEMAND", "arrival rates and turning ratios must be objects", "demand", "")
+        return ValidationResult(issues)
+
+    seg_ids = {s.id for s in network.segments}
+    fed = {m.to_segment for m in network.turning_movements}
+    for entry in rates:
+        if entry not in seg_ids:
+            add("UNKNOWN_ENTRY_SEGMENT", f"demand entry '{entry}' is not a segment of the network", "segment", entry)
+        elif entry in fed:
+            add("NOT_NETWORK_ENTRY", f"demand entry '{entry}' is fed by a turning movement, so it is not a network entry",
+                "segment", entry, WARNING)
+
+    moves = {m.id: m for m in network.turning_movements}
+    ratios: dict[str, dict[str, float]] = {}
+    for mid, r in raw_ratios.items():
+        if mid not in moves:
+            add("UNKNOWN_MOVEMENT", f"turning ratio for unknown movement '{mid}'", "turning_movement", mid)
+        else:
+            ratios.setdefault(moves[mid].from_segment, {})[mid] = r
+    issues += demand_issues(rates, ratios)
+    return ValidationResult(issues)
+
+
 def build_engine(network: Network, plans: list[SignalPlan], demand: dict, simulation: dict,
                  on_finish=None) -> Engine:
     network = NetworkService(network).provide_network_state()  # raises NetworkBlockedError
@@ -52,6 +105,10 @@ def build_engine(network: Network, plans: list[SignalPlan], demand: dict, simula
         signals_svc.set_signal_plan(plan, network)  # raises SignalPlanBlockedError
     controls = {i.id: i.control_type for i in network.intersections}
 
+    result = validate_scenario(network, demand, simulation)
+    if not result.is_valid:
+        raise DemandError(result.errors)  # warnings never block a run
+
     moves = {m.id: m for m in network.turning_movements}
     outgoing: dict[str, list] = {}
     for m in network.turning_movements:
@@ -59,9 +116,6 @@ def build_engine(network: Network, plans: list[SignalPlan], demand: dict, simula
 
     rates = demand.get("arrival_rates_vehicles_per_hour", {})
     ratios: dict[str, dict[str, float]] = {}
-    unknown = [mid for mid in demand.get("turning_ratios", {}) if mid not in moves]
-    if unknown:
-        raise DemandError([f"turning ratio for unknown movement '{m}'" for m in unknown])
     for mid, r in demand.get("turning_ratios", {}).items():
         ratios.setdefault(moves[mid].from_segment, {})[mid] = r
     vehicles = generate_vehicles(simulation.get("seed", 0), rates, ratios,
@@ -88,8 +142,6 @@ def build_engine(network: Network, plans: list[SignalPlan], demand: dict, simula
     segments = {s.id: Segment(s.length_m, s.speed_limit_mps) for s in network.segments}  # validated: limit set
     routes = {(entry, mid): _route(moves[mid], outgoing) for entry, rs in ratios.items() for mid in rs}
     dt = simulation.get("time_step_s", Params.dt)
-    if not 0.1 <= dt <= 1.0:
-        raise ValueError(f"time_step_s must be 0.1-1.0 s (TMS-F-040), got {dt}")
     return Engine(segments, routes, vehicles, signals=signals,
                   yields_to={k: sorted(v) for k, v in yields_to.items()},
                   duration=simulation.get("duration_s", 3600.0), params=Params(dt=dt), on_finish=on_finish)

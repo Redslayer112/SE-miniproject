@@ -178,6 +178,61 @@ def test_run_record_round_trip_preserves_metadata_and_metrics(store):
     assert restored["run_config"] == {"duration_s": 600.0, "time_step_s": 0.5}
 
 
+def test_completed_run_round_trips_after_store_reopen(tmp_path):
+    db_path = tmp_path / "run-history.sqlite3"
+    scenario_snapshot = copy.deepcopy(DOC)
+    run_config = {"duration_s": 600.0, "time_step_s": 0.5, "speed_multiplier": 1}
+    metrics = {
+        "status": "Completed",
+        "simulated_time": 600.0,
+        "duration": 600.0,
+        "vehicles_generated": 30,
+        "total_scheduled": 30,
+        "vehicles_entered": 30,
+        "vehicles_completed": 30,
+        "vehicles_in_network": 0,
+        "mean_travel_time": 16.4,
+        "average_speed_mps": 8.7,
+        "throughput_vph": 180.0,
+        "average_delay_s": 2.2,
+        "maximum_delay_s": 6.0,
+        "queue_length_veh": 1.5,
+        "average_queue_length_by_approach": {"R1": 0.5, "R2": 1.0},
+    }
+
+    with ScenarioStore(db_path) as first_store:
+        first_store.save_run(
+            run_id="run_persists_after_reopen",
+            scenario_name="Persistence Scenario",
+            label="Completed Run",
+            timestamp="2026-10-29T10:00:00",
+            seed=42,
+            scenario_snapshot=scenario_snapshot,
+            metrics=metrics,
+            run_config=run_config,
+        )
+
+    with ScenarioStore(db_path) as second_store:
+        assert second_store is not first_store
+        restored = second_store.load_run("run_persists_after_reopen")
+
+        assert restored["run_id"] == "run_persists_after_reopen"
+        assert restored["scenario_name"] == "Persistence Scenario"
+        assert restored["label"] == "Completed Run"
+        assert restored["timestamp"] == "2026-10-29T10:00:00"
+        assert restored["seed"] == 42
+        assert restored["scenario_snapshot"] == scenario_snapshot
+        assert restored["scenario_snapshot"]["simulation"]["seed"] == 42
+        assert restored["run_config"] == run_config
+        assert restored["metrics"] == metrics
+        assert restored["metrics"]["status"] == "Completed"
+        assert restored["metrics"]["mean_travel_time"] == 16.4
+        assert restored["metrics"]["average_queue_length_by_approach"] == {
+            "R1": 0.5,
+            "R2": 1.0,
+        }
+
+
 def test_malformed_saved_run_is_reported_as_store_error(store):
     store.save_run("bad-json", "Scenario", "Broken", "2026-10-29T00:00:00", 42,
                    DOC, {"vehicles_completed": 0}, {"duration_s": 10.0})
@@ -202,3 +257,25 @@ def test_existing_run_database_is_migrated_with_empty_run_config(tmp_path):
         upgraded.save_run("new", "Scenario", "New", "2026-10-29T12:00:00", 1,
                           DOC, {"vehicles_completed": 0}, {"duration_s": 20.0})
         assert upgraded.load_run("new")["run_config"] == {"duration_s": 20.0}
+
+
+@pytest.mark.parametrize("text", [
+    "",
+    "[]",
+    json.dumps({k: v for k, v in DOC.items() if k != "demand"}),
+    json.dumps({k: v for k, v in DOC.items() if k != "simulation"}),
+    json.dumps({k: v for k, v in DOC.items() if k != "network"}),
+    json.dumps({**DOC, "schema_version": "2.0"}),
+    json.dumps({**DOC, "simulation": {**DOC["simulation"], "seed": "42"}}),
+    json.dumps({**DOC, "demand": []}),
+], ids=["empty", "non_object", "no_demand", "no_simulation", "no_network", "wrong_version", "seed_string",
+        "demand_list"])
+def test_incomplete_import_is_rejected_with_nothing_stored(store, tmp_path, text):  # Issue #28
+    f = tmp_path / "bad.json"
+    f.write_text(text, encoding="utf-8")
+    with pytest.raises(ScenarioFormatError):
+        store.import_scenario(f)
+    if text.startswith("{"):
+        with pytest.raises(ScenarioFormatError):
+            store.save_scenario("bad", json.loads(text))
+    assert store.list_scenarios() == []

@@ -5,12 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from tms_sim.network import NetworkBlockedError
+from tms_sim.network import ControlType, NetworkBlockedError
 from tms_sim.network.serialization import network_from_dict
 from tms_sim.signal import SignalPhase, SignalPlan, SignalPlanBlockedError
 from tms_sim.signal.serialization import plan_from_dict
 from tms_sim.sim.demand import DemandError
-from tms_sim.sim.scenario import build_engine, load_scenario, phase_green
+from tms_sim.sim.scenario import build_engine, engine_from_document, load_scenario, phase_green
+from tms_sim.sim.serialization import load_scenario_document, save_scenario_document
+from tms_sim.storage.store import ScenarioStore
 
 FIXTURE = Path(__file__).parent / "data" / "scenario" / "small_valid_scenario.json"
 DOC = json.loads(FIXTURE.read_text())
@@ -104,3 +106,57 @@ def test_stop_controlled_intersection_yields_to_conflicting_approach():
     e = engine_from(doc)
     assert e.yields_to == {"SC": ["WC"], "WC": ["SC"]}  # crossing movements conflict
     assert finish(e).exited
+
+
+def permitted_turns_doc():
+    """E -> I1 (signalized) -> S -> I2 (stop) -> O1 or O2. Only S -> O2 is a configured turn at I2,
+    although O1 also leaves I2 and has the lower id."""
+    seg = lambda i, a, b: {"id": i, "from": a, "to": b, "length_m": 100, "lane_count": 1, "speed_limit_mps": 13.9}
+    return {
+        "schema_version": "1.0",
+        "network": {
+            "intersections": [
+                {"id": "I0", "position": [0, 0], "control_type": "uncontrolled"},
+                {"id": "I1", "position": [100, 0], "control_type": "signalized"},
+                {"id": "I2", "position": [200, 0], "control_type": "stop_controlled"},
+                {"id": "I3", "position": [300, 0], "control_type": "yield_controlled"},
+                {"id": "I4", "position": [200, 100], "control_type": "uncontrolled"},
+            ],
+            "segments": [seg("E", "I0", "I1"), seg("S", "I1", "I2"), seg("O1", "I2", "I3"), seg("O2", "I2", "I4")],
+            "turning_movements": [
+                {"id": "TM_A", "intersection": "I1", "from_segment": "E", "to_segment": "S"},
+                {"id": "TM_B", "intersection": "I2", "from_segment": "S", "to_segment": "O2"},
+            ],
+        },
+        "signal_plan": {"intersection_id": "I1",
+                        "phases": [{"order": 1, "movement_ids": ["TM_A"], "green_s": 20, "yellow_s": 3, "all_red_s": 1}]},
+        "demand": {"arrival_rates_vehicles_per_hour": {"E": 600}, "turning_ratios": {"TM_A": 1.0}},
+        "simulation": {"seed": 7, "duration_s": 300, "time_step_s": 0.5},
+    }
+
+
+def test_only_configured_turning_movements_are_used_in_a_run():  # TC-NET-02, TMS-F-011
+    e = finish(engine_from_document(permitted_turns_doc()))
+    assert set(map(tuple, e.routes.values())) == {("E", "S", "O2")}
+    assert e.exited
+    assert all(c.route == ["E", "S", "O2"] for c in e.exited + e.cars)  # nobody takes the unconfigured S -> O1
+
+
+def test_control_types_survive_save_and_reload(tmp_path):  # TC-NET-02, TMS-F-011
+    doc = permitted_turns_doc()
+    expected = {"I0": ControlType.UNCONTROLLED, "I1": ControlType.SIGNALIZED,
+                "I2": ControlType.STOP_CONTROLLED, "I3": ControlType.YIELD_CONTROLLED, "I4": ControlType.UNCONTROLLED}
+    f = tmp_path / "turns.json"
+    save_scenario_document(doc, f)
+    from_file = load_scenario_document(f)
+    with ScenarioStore(tmp_path / "lib.sqlite3") as store:
+        store.save_scenario("turns", doc)
+    with ScenarioStore(tmp_path / "lib.sqlite3") as store:
+        from_store = store.load_scenario("turns")
+    for reloaded in (from_file, from_store):
+        assert reloaded == doc
+        net = network_from_dict(reloaded)
+        assert {i.id: i.control_type for i in net.intersections} == expected
+        assert [(m.id, m.from_segment, m.to_segment) for m in net.turning_movements] == [
+            ("TM_A", "E", "S"), ("TM_B", "S", "O2")]
+        assert finish(engine_from_document(reloaded)).exited

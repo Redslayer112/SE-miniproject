@@ -8,15 +8,23 @@ import math
 import random
 from dataclasses import dataclass
 
+from tms_sim.network.validation import ValidationIssue
+
 RATIO_TOL = 1e-6
 
 
 class DemandError(ValueError):
-    """Invalid demand input; .errors lists every problem (like network validation, TMS-F-012)."""
+    """Invalid demand input; .errors lists every problem (like network validation, TMS-F-012).
 
-    def __init__(self, errors: list[str]):
-        super().__init__("; ".join(errors))
-        self.errors = errors
+    Accepts message strings or ValidationIssue objects. .issues always holds ValidationIssue
+    (element id, element type, code, message, severity); .errors holds the message strings.
+    """
+
+    def __init__(self, errors: list):
+        self.issues = [e if isinstance(e, ValidationIssue) else ValidationIssue("INVALID_DEMAND", str(e), "demand", "")
+                       for e in errors]
+        self.errors = [i.message for i in self.issues]
+        super().__init__("; ".join(self.errors))
 
 
 @dataclass(frozen=True)
@@ -31,23 +39,33 @@ def _number(x) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
-def validate_demand(arrival_rates: dict[str, float], turning_ratios: dict[str, dict[str, float]]) -> None:
-    errors = []
+def demand_issues(arrival_rates: dict[str, float], turning_ratios: dict[str, dict[str, float]]) -> list[ValidationIssue]:
+    """Every demand problem as a ValidationIssue; turning_ratios is grouped by entry segment."""
+    issues = []
+
+    def add(code, entry, message):
+        issues.append(ValidationIssue(code, f"{entry}: {message}", "segment", entry))
+
     for entry, rate in arrival_rates.items():
         if not _number(rate) or rate < 0:
-            errors.append(f"{entry}: arrival rate must be a number >= 0 veh/h, got {rate!r}")
+            add("INVALID_ARRIVAL_RATE", entry, f"arrival rate must be a number >= 0 veh/h, got {rate!r}")
         ratios = turning_ratios.get(entry)
         if not ratios:
-            errors.append(f"{entry}: no turning ratios defined")
+            add("MISSING_TURNING_RATIOS", entry, "no turning ratios defined")
         elif any(not _number(r) or r < 0 for r in ratios.values()):
-            errors.append(f"{entry}: turning ratios must be numbers >= 0")
+            add("INVALID_TURNING_RATIO", entry, "turning ratios must be numbers >= 0")
         elif abs(sum(ratios.values()) - 1.0) > RATIO_TOL:
-            errors.append(f"{entry}: turning ratios must sum to 1, got {sum(ratios.values()):g}")
+            add("TURNING_RATIO_SUM", entry, f"turning ratios must sum to 1, got {sum(ratios.values()):g}")
     for entry in turning_ratios:
         if entry not in arrival_rates:
-            errors.append(f"{entry}: turning ratios given but no arrival rate")
-    if errors:
-        raise DemandError(errors)
+            add("RATIOS_WITHOUT_RATE", entry, "turning ratios given but no arrival rate")
+    return issues
+
+
+def validate_demand(arrival_rates: dict[str, float], turning_ratios: dict[str, dict[str, float]]) -> None:
+    issues = demand_issues(arrival_rates, turning_ratios)
+    if issues:
+        raise DemandError(issues)
 
 
 def generate_vehicles(
@@ -63,7 +81,8 @@ def generate_vehicles(
     same inputs always give the same sequence. Result is sorted by departure time.
     """
     if not _number(duration_s) or duration_s <= 0:
-        raise DemandError([f"duration must be > 0 s, got {duration_s!r}"])
+        raise DemandError([ValidationIssue("INVALID_DURATION", f"duration must be > 0 s, got {duration_s!r}",
+                                           "simulation", "duration_s")])
     validate_demand(arrival_rates, turning_ratios)
     rng = random.Random(seed)
     raw = []

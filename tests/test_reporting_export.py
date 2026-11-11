@@ -18,6 +18,8 @@ Covers:
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
+import io
 from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
@@ -168,6 +170,44 @@ def test_exported_csv_contains_measured_issue10_values(tmp_path):
     assert values["average_queue_length_veh:A"]["Value"] == "0.5"
 
 
+@pytest.mark.parametrize(
+    "invalid_value",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "positive-infinity", "negative-infinity"],
+)
+def test_run_csv_rejects_non_finite_metrics_before_writing(tmp_path, invalid_value):
+    run = _make_dummy_run()
+    run = replace(
+        run,
+        metrics=replace(run.metrics, mean_travel_time=invalid_value),
+    )
+    path = tmp_path / "invalid-run.csv"
+
+    with pytest.raises(ExportError, match="non-finite numeric value"):
+        export_run_csv(run, path)
+
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "positive-infinity", "negative-infinity"],
+)
+def test_comparison_csv_rejects_non_finite_metrics_before_writing(
+    tmp_path, invalid_value
+):
+    baseline = _make_dummy_run(travel_time=invalid_value, label="Baseline")
+    candidate = _make_dummy_run(travel_time=10.0, label="Candidate")
+    comparison = compare_runs(baseline, candidate)
+    path = tmp_path / "invalid-comparison.csv"
+
+    with pytest.raises(ExportError, match="non-finite numeric value"):
+        export_comparison_csv(comparison, path)
+
+    assert not path.exists()
+
+
 def test_missing_and_unmodeled_metrics_distinguished_from_zero():
     """Verify unavailable metrics are 'N/A' and zero values are clearly '0', not confused."""
     # When in_network is 0, it must be "0", NOT "N/A"
@@ -198,6 +238,9 @@ def test_missing_and_unmodeled_metrics_distinguished_from_zero():
     assert data_map["Average Queue Length"][2] == "N/A"
     assert data_map["Average Queue Length"][3] == "veh"
     assert data_map["Average Queue Length"][4] == "Unavailable"
+
+    assert data_map["Average Speed"][2] == "N/A"
+    assert data_map["Average Speed"][4] == "Unavailable"
 
 
 def test_invalid_export_path_reports_export_error():
@@ -263,7 +306,7 @@ def test_generate_comparison_csv_headers_and_differences():
     tt_row = data_map["Mean Travel Time"]
     assert tt_row[1] == "20.0"
     assert tt_row[2] == "15.0"
-    assert tt_row[3] == "-5.0"
+    assert tt_row[3] == "-5.00"
     assert tt_row[4] == "-25.0%"
     assert tt_row[5] == "s"
     assert tt_row[6] == "improved"
@@ -303,6 +346,50 @@ def test_comparison_csv_zero_baseline_safe_percentage():
     assert comp_row[2] == "10"
     assert comp_row[3] == "+10"
     assert comp_row[4] == "N/A (base 0)"
+
+
+def test_comparison_csv_preserves_none_as_na():
+    baseline = _make_dummy_run(travel_time=None, label="Baseline")
+    candidate = _make_dummy_run(travel_time=None, label="Candidate")
+    comparison = compare_runs(baseline, candidate)
+
+    rows = list(csv.reader(io.StringIO(generate_comparison_csv(comparison))))
+    travel_time_row = next(row for row in rows if row[0] == "Mean Travel Time")
+
+    assert travel_time_row[1:5] == ["N/A", "N/A", "N/A", "N/A"]
+    assert travel_time_row[6] == "unavailable"
+
+
+def test_comparison_csv_formats_float_and_integer_deltas():
+    baseline = _make_dummy_run(travel_time=10.0, completed=10, duration=10.0)
+    candidate = _make_dummy_run(travel_time=12.5, completed=12, duration=10.5)
+    comparison = compare_runs(baseline, candidate)
+
+    rows = list(csv.reader(io.StringIO(generate_comparison_csv(comparison))))
+    data = {row[0]: row for row in rows[1:]}
+
+    assert data["Simulation Duration"][3] == "+0.50"
+    assert data["Mean Travel Time"][3] == "+2.50"
+    assert data["Mean Travel Time"][4] == "+25.0%"
+    assert data["Vehicles Completed"][3] == "+2"
+
+
+def test_comparison_csv_round_trips_complex_labels_and_notes():
+    complex_text = 'Text, with "quotes" and\nnewlines'
+    comparison = compare_runs(
+        _make_dummy_run(label=f"Baseline {complex_text}", scenario_name=complex_text),
+        _make_dummy_run(label=f"Candidate {complex_text}", scenario_name=complex_text),
+    )
+    comparison.metrics[0] = replace(comparison.metrics[0], note=complex_text)
+
+    rows = list(csv.reader(io.StringIO(generate_comparison_csv(comparison))))
+    mean_travel_row = next(row for row in rows if row[0] == "Mean Travel Time")
+
+    assert rows[1][1] == f"Baseline {complex_text}"
+    assert rows[1][2] == f"Candidate {complex_text}"
+    assert rows[2][1] == complex_text
+    assert rows[2][2] == complex_text
+    assert mean_travel_row[7] == complex_text
 
 
 # ---------------------------------------------------------------------------

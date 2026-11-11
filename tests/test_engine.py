@@ -33,11 +33,11 @@ def test_free_vehicle_travels_whole_route_and_exits():  # TC-SIM-01
 
 def test_idm_hand_checked_values():  # AC-040: a = a_max*(1-(v/v0)^4-(s*/s)^2)
     e = make([])
-    assert e._accel(car(0.0), False) == pytest.approx(1.5)  # free road from rest
-    assert e._accel(car(15.0), False) == pytest.approx(0.0)  # at the speed limit
+    assert e._accel(car(0.0), None) == pytest.approx(1.5)  # free road from rest
+    assert e._accel(car(15.0), None) == pytest.approx(0.0)  # at the speed limit
     follower = car(10.0, x=0.0)
     e.cars = [follower, Car(1, ["A"], 0, 22.0, 10.0, 0.0)]  # gap = 22 - 5 - 0 = 17 = s* (v=vl=10)
-    assert e._accel(follower, False) == pytest.approx(1.5 * (1 - (10 / 15) ** 4 - 1))
+    assert e._accel(follower, None) == pytest.approx(1.5 * (1 - (10 / 15) ** 4 - 1))
 
 
 def test_follower_never_overlaps_a_stopped_leader():
@@ -77,7 +77,7 @@ def test_gap_acceptance_rule(m_x, m_v, must_wait):
     e = gap_engine()
     a = Car(0, ["A", "X"], 0, 250.0, 10.0, 0.0)
     e.cars = [a, Car(1, ["M"], 0, m_x, m_v, 0.0)]
-    assert e._blocked(a) is must_wait
+    assert (e._stop_line(a) is not None) is must_wait
 
 
 def test_yielding_vehicle_still_gets_through():
@@ -149,5 +149,5 @@ def test_committed_car_may_clear_when_it_cannot_stop():
     e = make([], signals={("A", "B"): lambda t: False})
     fast = Car(0, ["A", "B"], 0, 498.0, 15.0, 0.0)  # needs 12.5 m at 9 m/s^2, has 2 m
     e.cars = [fast]
-    assert e._blocked(fast) is False
-    assert e._blocked(Car(1, ["A", "B"], 0, 400.0, 15.0, 0.0)) is True  # 100 m out: must stop
+    assert e._stop_line(fast) is None
+    assert e._stop_line(Car(1, ["A", "B"], 0, 400.0, 15.0, 0.0)) == (0, 100.0)  # 100 m out: must stop

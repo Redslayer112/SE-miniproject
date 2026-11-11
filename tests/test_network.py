@@ -210,7 +210,7 @@ def test_service_camel_case_aliases():
 # Additional regression tests for the validation fixes.
 
 
-def test_empty_network_blocked():
+def test_empty_lists_network_blocked():  # renamed: the duplicate name hid the earlier test
     net = Network([], [], [])
 
     result = validate(net)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,16 @@ if TYPE_CHECKING:
 
 
 class ExportError(Exception):
-    """Raised when an export operation fails due to invalid parameters or I/O error."""
+    """Raised for invalid export data or parameters, and for I/O failures."""
+
+
+def _reject_non_finite_values(values: list[tuple[str, object]]) -> None:
+    """Reject NaN and infinities instead of exporting them as ordinary values."""
+    for name, value in values:
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ExportError(
+                f"Cannot export non-finite numeric value for '{name}'."
+            )
 
 
 def _ensure_run_record(run: SimulationRunRecord | Engine) -> SimulationRunRecord:
@@ -42,8 +52,25 @@ def _ensure_run_record(run: SimulationRunRecord | Engine) -> SimulationRunRecord
 
 
 def generate_run_csv(run: SimulationRunRecord | Engine) -> str:
-    """Generate RFC 4180 compliant CSV string for a completed simulation run."""
+    """Generate CSV for a completed run; reject non-finite exported numbers."""
     record = _ensure_run_record(run)
+    m = record.metrics
+    values = [
+        ("simulated_time", m.simulated_time),
+        ("duration", m.duration),
+        ("mean_travel_time", m.mean_travel_time),
+        ("maximum_delay_s", m.maximum_delay_s),
+        ("average_delay_s", m.average_delay_s),
+        ("throughput_vph", m.throughput_vph),
+        ("average_speed_mps", m.average_speed_mps),
+        ("queue_length_veh", m.queue_length_veh),
+    ]
+    values.extend(
+        (f"average_queue_length_by_approach[{approach}]", value)
+        for approach, value in m.average_queue_length_by_approach.items()
+    )
+    _reject_non_finite_values(values)
+
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
 
@@ -61,7 +88,6 @@ def generate_run_csv(run: SimulationRunRecord | Engine) -> str:
     writer.writerow(["simulated_time_s", "Simulated Time", f"{record.metrics.simulated_time:.1f}", "s", "Available", "Elapsed simulation clock time"])
 
     # Modeled metrics
-    m = record.metrics
     def metric(key: str, name: str, value, unit: str, note: str):
         available = value is not None
         formatted = f"{value:.1f}" if isinstance(value, float) else str(value) if available else "N/A"
@@ -418,9 +444,26 @@ def generate_run_html(run: SimulationRunRecord | Engine) -> str:
 
 
 def generate_comparison_csv(comparison: ScenarioComparison) -> str:
-    """Generate RFC 4180 compliant CSV string for a scenario comparison."""
+    """Generate comparison CSV; reject non-finite values before writing rows."""
     if comparison is None or not isinstance(comparison, ScenarioComparison):
         raise ValueError("A valid ScenarioComparison instance is required for export.")
+
+    dur_b = comparison.baseline.metrics.duration
+    dur_c = comparison.candidate.metrics.duration
+    dur_diff = dur_c - dur_b
+    values = [
+        ("baseline.duration", dur_b),
+        ("candidate.duration", dur_c),
+        ("duration.absolute_change", dur_diff),
+    ]
+    for metric in comparison.metrics:
+        values.extend((
+            (f"{metric.name}.baseline_value", metric.baseline_value),
+            (f"{metric.name}.candidate_value", metric.candidate_value),
+            (f"{metric.name}.absolute_change", metric.absolute_change),
+            (f"{metric.name}.percent_change", metric.percent_change),
+        ))
+    _reject_non_finite_values(values)
 
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
@@ -459,14 +502,11 @@ def generate_comparison_csv(comparison: ScenarioComparison) -> str:
         "Scenario identifiers",
     ])
 
-    dur_b = comparison.baseline.metrics.duration
-    dur_c = comparison.candidate.metrics.duration
-    dur_diff = dur_c - dur_b
     writer.writerow([
         "Simulation Duration",
         f"{dur_b:.1f}",
         f"{dur_c:.1f}",
-        f"{dur_diff:+.1f}" if dur_diff != 0 else "0.0",
+        f"{dur_diff:+.2f}" if dur_diff > 0 else f"{dur_diff:.2f}",
         "N/A",
         "s",
         "Compatible" if comparison.duration_compatible else "Incompatible",
@@ -492,12 +532,21 @@ def generate_comparison_csv(comparison: ScenarioComparison) -> str:
         if m.absolute_change is None:
             abs_str = "N/A"
         else:
-            is_int_metric = isinstance(m.baseline_value, int) and isinstance(m.candidate_value, int)
-            abs_val = int(m.absolute_change) if is_int_metric else m.absolute_change
-            if abs_val > 0:
-                abs_str = f"+{abs_val}"
+            is_int_metric = (
+                isinstance(m.baseline_value, int)
+                and not isinstance(m.baseline_value, bool)
+                and isinstance(m.candidate_value, int)
+                and not isinstance(m.candidate_value, bool)
+            )
+            if is_int_metric:
+                abs_val = int(m.absolute_change)
+                abs_str = f"+{abs_val}" if abs_val > 0 else str(abs_val)
             else:
-                abs_str = f"{abs_val}"
+                abs_str = (
+                    f"+{m.absolute_change:.2f}"
+                    if m.absolute_change > 0
+                    else f"{m.absolute_change:.2f}"
+                )
 
         if m.percent_change is None:
             if m.is_available and m.baseline_value == 0:

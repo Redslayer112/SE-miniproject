@@ -673,7 +673,17 @@ class ScenarioComparisonDialog(QDialog):
             diff_text = "—"
             if m.absolute_change is not None:
                 prefix = "+" if m.absolute_change > 0 else ""
-                diff_text = f"{prefix}{m.absolute_change:.1f}" if isinstance(m.absolute_change, float) and "." in str(m.baseline_value) else f"{prefix}{m.absolute_change}"
+                is_integer_metric = (
+                    isinstance(m.baseline_value, int)
+                    and not isinstance(m.baseline_value, bool)
+                    and isinstance(m.candidate_value, int)
+                    and not isinstance(m.candidate_value, bool)
+                )
+                diff_text = (
+                    f"{prefix}{int(m.absolute_change)}"
+                    if is_integer_metric
+                    else f"{prefix}{m.absolute_change:.2f}"
+                )
             item_diff = QTableWidgetItem(diff_text)
             item_diff.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 

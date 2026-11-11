@@ -140,6 +140,46 @@ def test_metrics_are_recomputed_from_lifecycle_and_measurement_events():
     assert m.queue_length_veh == pytest.approx(0.5)
 
 
+def test_average_travel_time_deduplicates_duplicate_spawn_and_exit_events():
+    events = [
+        {"type": "spawn", "time": 0.0, "vehicle_id": 1},
+        {"type": "spawn", "time": 100.0, "vehicle_id": 1},
+        {"type": "exit", "time": 10.0, "vehicle_id": 1},
+        {"type": "exit", "time": 110.0, "vehicle_id": 1},
+    ]
+    engine = fake_engine(events)
+
+    metrics = compute_metrics(engine)
+    incremental = IncrementalMetricsCalculator().calculate(engine)
+
+    assert metrics.vehicles_entered == 1
+    assert metrics.vehicles_completed == 1
+    assert metrics.mean_travel_time == pytest.approx(10.0)
+    assert incremental.mean_travel_time == pytest.approx(10.0)
+
+
+def test_average_travel_time_uses_only_uniquely_matched_completed_trips():
+    events = [
+        {"type": "spawn", "time": 0.0, "vehicle_id": 1},
+        {"type": "exit", "time": 10.0, "vehicle_id": 1},
+        {"type": "spawn", "time": 1.0, "vehicle_id": 2},
+        {"type": "exit", "time": 9.0, "vehicle_id": 2},
+        {"type": "spawn", "time": 3.0, "vehicle_id": 3},
+        {"type": "exit", "time": 5.0, "vehicle_id": 4},
+    ]
+    engine = fake_engine(events)
+
+    metrics = compute_metrics(engine)
+    incremental = IncrementalMetricsCalculator().calculate(engine)
+
+    # Vehicle 3 has no exit, vehicle 4 has no spawn; trips 1 and 2 take 10s and 8s.
+    assert metrics.vehicles_entered == 3
+    assert metrics.vehicles_completed == 2
+    assert metrics.mean_travel_time == pytest.approx(9.0)
+    assert incremental.vehicles_completed == 2
+    assert incremental.mean_travel_time == pytest.approx(9.0)
+
+
 def test_empty_run_distinguishes_zero_counts_from_unavailable_metrics():
     m = compute_metrics(fake_engine([], time=0.0, finished=True))
 
@@ -151,6 +191,48 @@ def test_empty_run_distinguishes_zero_counts_from_unavailable_metrics():
     assert m.average_speed_mps is None
     assert m.queue_length_veh is None
     assert m.average_queue_length_by_approach == {}
+
+
+def test_average_speed_is_unavailable_without_measurement_samples():
+    engine = fake_engine([], cars=[SimpleNamespace(v=8.0)])
+
+    assert compute_metrics(engine).average_speed_mps is None
+    assert IncrementalMetricsCalculator().calculate(engine).average_speed_mps is None
+
+
+def test_average_speed_includes_stationary_vehicle_time():
+    engine = fake_engine(
+        [
+            {
+                "type": "sample",
+                "time": 1.0,
+                "dt": 1.0,
+                "speed_distance_m": 10.0,
+                "active_vehicle_time_s": 1.0,
+                "queue_by_approach": {},
+            },
+            {
+                "type": "sample",
+                "time": 4.0,
+                "dt": 3.0,
+                "speed_distance_m": 0.0,
+                "active_vehicle_time_s": 3.0,
+                "queue_by_approach": {},
+            },
+        ],
+        time=4.0,
+    )
+
+    assert compute_metrics(engine).average_speed_mps == pytest.approx(2.5)
+    incremental = IncrementalMetricsCalculator().calculate(engine)
+    assert incremental.average_speed_mps == pytest.approx(2.5)
+
+
+def test_zero_completed_trips_after_elapsed_time_has_zero_throughput():
+    metrics = compute_metrics(fake_engine([], time=2.0))
+
+    assert metrics.vehicles_completed == 0
+    assert metrics.throughput_vph == pytest.approx(0.0)
 
 
 def test_incomplete_trip_is_counted_but_not_used_for_completed_trip_metrics():

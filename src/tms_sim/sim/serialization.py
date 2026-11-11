@@ -49,9 +49,12 @@ def scenario_from_dict(data: dict[str, Any]) -> dict[str, Any]:
             plans = [data["signal_plan"]]
         else:
             plans = data["signal_plans"]
-            if not isinstance(plans, list) or not plans:
+            # Empty is allowed: a network with no signalized intersection needs
+            # no plan (Issue #33 defect SI-D1); build_engine still blocks a
+            # signalized intersection that has no plan.
+            if not isinstance(plans, list):
                 raise ScenarioFormatError(
-                    "signal_plans must be a non-empty list."
+                    "signal_plans must be a list."
                 )
 
         for plan in plans:
@@ -82,6 +85,19 @@ def scenario_from_dict(data: dict[str, Any]) -> dict[str, Any]:
         if field not in simulation:
             raise ScenarioFormatError(
                 f"simulation is missing required field: {field}"
+            )
+
+    # Types only; ranges are checked by sim.scenario.validate_scenario before a run.
+    seed = simulation["seed"]
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ScenarioFormatError(
+            f"simulation.seed must be an integer, got {seed!r}"
+        )
+    for field in ("duration_s", "time_step_s"):
+        value = simulation[field]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ScenarioFormatError(
+                f"simulation.{field} must be a number, got {value!r}"
             )
 
     return deepcopy(data)
