@@ -102,10 +102,8 @@ def set_scenario_signal_plans(scenario_data: dict, plans_list: list[dict]) -> No
             scenario_data["signal_plan"] = plans_list[0]
             scenario_data.pop("signal_plans", None)
     else:
-        if "signal_plans" in scenario_data:
-            scenario_data["signal_plans"] = []
-        elif "signal_plan" in scenario_data:
-            scenario_data["signal_plan"] = {}
+        scenario_data["signal_plans"] = []
+        scenario_data.pop("signal_plan", None)
 
 
 def generate_unique_id(prefix: str, existing_ids: list[str]) -> str:
