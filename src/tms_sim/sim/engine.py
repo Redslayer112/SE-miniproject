@@ -54,12 +54,15 @@ class Engine:
         self.segs, self.routes, self.vehicles = segments, routes, sorted(vehicles, key=lambda v: v.depart_time)
         self.signals, self.yields_to = signals or {}, yields_to or {}
         self.duration, self.p, self.on_finish = duration, params, on_finish
+        self.running_state_transitions: list[dict] = []
+        self._running = False
         self.reset()
 
     # ---- controls (TMS-F-041) ----
     def reset(self):
         """Back to t = 0 with the same inputs; nothing random lives here so reruns are identical."""
-        self.time, self.running, self.finished, self.speed = 0.0, False, False, 1
+        self.time, self.finished, self.speed = 0.0, False, 1
+        self._set_running(False, "reset", "engine")
         self.cars: list[Car] = []
         self.exited: list[Car] = []
         self.events: list[tuple] = []  # (time, vehicle id, "spawn" | "exit", segment id)
@@ -70,10 +73,33 @@ class Engine:
         self._wall = 0.0
 
     def start(self):
-        self.running = not self.finished
+        self._set_running(not self.finished, "start", "engine")
 
-    def pause(self):
-        self.running = False
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    @running.setter
+    def running(self, value: bool):
+        """Retain the public attribute API and audit direct/unknown transitions."""
+        self._set_running(value, "unknown_direct_assignment", "unknown")
+
+    def _set_running(self, value: bool, reason: str, source: str):
+        value = bool(value)
+        previous = getattr(self, "_running", False)
+        self._running = value
+        if previous != value:
+            self.running_state_transitions.append({
+                "sequence": len(self.running_state_transitions) + 1,
+                "simulation_time_s": round(float(getattr(self, "time", 0.0)), 3),
+                "from_running": previous,
+                "to_running": value,
+                "reason": reason,
+                "source": source,
+            })
+
+    def pause(self, reason: str = "programmatic", source: str | None = None):
+        self._set_running(False, reason, source or "programmatic")
 
     def set_speed(self, multiplier):
         if multiplier not in SPEEDS:
@@ -143,7 +169,8 @@ class Engine:
             "queue_by_approach": queues,
         })
         if self.time >= self.duration:
-            self.finished, self.running = True, False
+            self.finished = True
+            self._set_running(False, "completion", "engine")
             if self.on_finish:
                 self.on_finish(self)  # exactly once per run: step() is a no-op once finished
 

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "test_case": "TC-REL-01",
+  "mode": "negative-cleanup",
+  "status": "Passed",
+  "started_at_utc": "2026-11-11T12:03:00.130027+00:00",
+  "finished_at_utc": "2026-11-11T12:03:01.002097+00:00",
+  "expected_observation": "Injected cleanup failure was detected and recorded by the supervisor.",
+  "negative_control_detected": true,
+  "run": {
+    "seed": 42,
+    "requested_duration_s": 2.0,
+    "timeout_seconds": 60.0,
+    "started_at_utc": "2026-11-11T12:03:00.130027+00:00",
+    "finished_at_utc": "2026-11-11T12:03:01.001754+00:00",
+    "pid": 22812,
+    "exit_code": 0,
+    "timed_out": false,
+    "runner_status": "Passed",
+    "runner_output": {
+      "status": "Passed",
+      "exception": null,
+      "wall_clock_seconds": 0.39437509999879694,
+      "check_count": 20,
+      "failed_checks": []
+    },
+    "stdout_file": "artifacts\\issue12\\tc_rel_01\\negative-cleanup_20261111T120300_129914Z.stdout.txt",
+    "stderr_file": "artifacts\\issue12\\tc_rel_01\\negative-cleanup_20261111T120300_129914Z.stderr.txt",
+    "runner_json": "artifacts\\issue12\\tc_rel_01\\negative-cleanup_20261111T120300_129914Z.json",
+    "cleanup": {
+      "initial_pid": 22812,
+      "descendant_pids": [],
+      "terminated_pids": [],
+      "killed_pids": [],
+      "graceful_wait_seconds": 5.0,
+      "force_wait_seconds": 5.0,
+      "parent_reaped": true,
+      "remaining_pids": [],
+      "status": "Failed",
+      "errors": [
+        "Traceback (most recent call last):\n  File \"C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject-main\\issue12-4x-work\\scripts\\issue12_tc_rel_01_supervisor.py\", line 198, in terminate_process_tree\n    raise RuntimeError(\n        \"TC-REL-01 injected cleanup failure\"\n    )\nRuntimeError: TC-REL-01 injected cleanup failure\n"
+      ]
+    },
+    "supervisor_status": "Failed",
+    "exception": null,
+    "supervisor_wall_clock_seconds": 0.871735599999738
+  },
+  "note": "Negative controls use a short 2-second simulation. They are not acceptance runs."
+}

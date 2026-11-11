@@ -24,6 +24,7 @@ Covers:
 from pathlib import Path
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit
 
 from tms_sim.ui.app import Workbench
@@ -344,6 +345,85 @@ def test_keyboard_shortcuts_trigger_when_not_focused_on_input(workbench):
     # R triggers Reset
     workbench._shortcut_reset()
     assert workbench.engine.time == 0.0
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Z, Qt.Key.Key_B])
+def test_enter_z_and_b_do_not_pause_simulation(workbench, qapp, key):
+    workbench.show()
+    qapp.processEvents()
+    workbench.canvas.setFocus()
+    qapp.processEvents()
+    workbench.start_simulation()
+
+    QTest.keyClick(workbench.canvas, key)
+    qapp.processEvents()
+
+    assert workbench.engine.running is True
+    assert workbench.timer.isActive() is True
+    assert workbench.pause_provenance == []
+
+
+def test_space_shortcut_pauses_and_records_source(workbench, qapp):
+    workbench.show()
+    qapp.processEvents()
+    workbench.canvas.setFocus()
+    qapp.processEvents()
+    workbench.start_simulation()
+
+    QTest.keyClick(workbench.canvas, Qt.Key.Key_Space)
+    qapp.processEvents()
+
+    assert workbench.engine.running is False
+    assert workbench.timer.isActive() is False
+    assert workbench.pause_provenance[-1]["source"] == "space_shortcut"
+    assert workbench.engine.running_state_transitions[-1]["reason"] == "space_shortcut"
+    assert workbench.engine.running_state_transitions[-1]["source"] == "space_shortcut"
+
+
+def test_pause_button_records_source_and_focused_widget(workbench, qapp):
+    workbench.start_simulation()
+    workbench.btn_pause.click()
+
+    assert workbench.engine.running is False
+    record = workbench.pause_provenance[-1]
+    assert record["source"] == "pause_button"
+    assert record["focused_widget"] is None or {
+        "session_id", "class_name", "object_name",
+    }.issubset(record["focused_widget"])
+    assert workbench.engine.running_state_transitions[-1]["reason"] == "pause_button"
+    assert workbench.engine.running_state_transitions[-1]["source"] == "pause_button"
+
+
+def test_programmatic_workbench_pause_records_focused_widget(workbench, qapp):
+    workbench.show()
+    qapp.processEvents()
+    workbench.canvas.setFocus()
+    qapp.processEvents()
+    workbench.start_simulation()
+
+    workbench.pause_simulation()
+
+    record = workbench.pause_provenance[-1]
+    assert record["source"] == "programmatic"
+    assert record["focused_widget"] is not None
+    assert record["focused_widget"]["session_id"] > 0
+    assert record["focused_widget"]["class_name"] == type(workbench.canvas).__name__
+    assert "object_name" in record["focused_widget"]
+
+
+def test_programmatic_and_unexplained_engine_pauses_are_audited(workbench):
+    workbench.start_simulation()
+    workbench.engine.pause()
+    assert workbench.engine.running_state_transitions[-1]["reason"] == "programmatic"
+    assert workbench.engine.running_state_transitions[-1]["to_running"] is False
+    assert workbench.engine.running_state_transitions[-1]["source"] == "programmatic"
+
+    workbench.engine.start()
+    workbench.engine.running = False
+    transition = workbench.engine.running_state_transitions[-1]
+    assert transition["reason"] == "unknown_direct_assignment"
+    assert transition["source"] == "unknown"
+    assert transition["to_running"] is False
 
 
 def test_gui_startup_and_shutdown_smoke(qapp):

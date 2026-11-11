@@ -1,11 +1,11 @@
-# Issue #11 — Test Catalogue (DRAFT)
+﻿# Issue #11 â€” Test Catalogue (DRAFT)
 
-**Project:** Traffic Management System (Simulation)  
-**Status:** Draft for team review; implementation and baseline-dependent test criteria require verification.  
-**Source:** SRS v0.2, SAD v1.0, STP v1.0 uploaded for this task.  
-**Important:** These are test specifications, not execution results. Do not mark any test Passed until the implementation exists and the test has actually run.
+**Project:** Traffic Management System (Simulation)
+**Status:** Draft for team review; implementation and operational test procedures require verification. The broad measurable-NFR decision was approved on 2026-10-27. The TC-REL-01 operational procedure has been approved and executed successfully for headless engine reliability. TC-UX-01 and TC-PORT-01 still require their respective procedures and evidence.
+**Source:** SRS v0.2, SAD v1.0, STP v1.0 uploaded for this task.
+**Important:** Test steps are specifications; the Status column records execution outcomes and evidence where a test has run. Do not mark any test Passed until the implementation exists and the test has actually run.
 
-**STP traceability note:** TC-NET-02 (TMS-F-011), TC-NET-04 (TMS-F-013), TC-SIM-03 (TMS-F-042), TC-MET-02 (TMS-F-051), and TC-MET-03 (TMS-F-052) are included in this draft catalogue but are missing from STP §13. Their corresponding STP traceability entries require team review and inclusion in a revised STP draft. This documentation gap does not establish that the associated functionality is implemented or tested.
+**STP traceability note:** TC-NET-02 (TMS-F-011), TC-NET-04 (TMS-F-013), TC-SIM-03 (TMS-F-042), TC-MET-02 (TMS-F-051), and TC-MET-03 (TMS-F-052) are included in this draft catalogue but are missing from STP Â§13. Their corresponding STP traceability entries require team review and inclusion in a revised STP draft. This documentation gap does not establish that the associated functionality is implemented or tested.
 
 ## Common conventions
 
@@ -42,10 +42,10 @@
 
 | Test ID | Requirement | Preconditions / procedure | Expected result | Status |
 | --- | --- | --- | --- | --- |
-| TC-PERF-01 | TMS-NF-001 | Reference scenario: 10 intersections / 500 vehicles / fixed seed / 1 simulated hour; measure complete-run FPS at 1x | At least 15 FPS average under the approved full-run formula | **Incomplete / Blocked** — GUI stalled at 2,123.6/3,600 s; partial 6.45 FPS is diagnostic only. See `docs/issue12_acceptance.md`. |
-| TC-REL-01 | TMS-NF-002 | Run the agreed seeded reliability scenario three times for one simulated hour each | All runs complete without crash | **Incomplete / Blocked** — headless evidence: three one-hour runs passed. 4x GUI evidence: seed 42 completed one hour; seeds 43 and 44 paused after recorded mouse presses. These do not establish three clean GUI runs. See `artifacts/issue12/system_checks.json` and `artifacts/issue12/gui_4x_reliability_seed4*.json`. |
-| TC-UX-01 | TMS-NF-003 | Five new testers attempt to build and run a two-intersection network without help; time each attempt | At least four of five finish within ten minutes | **Blocked** — no human participants; automated fixture workflow is not user testing. |
-| TC-PORT-01 | TMS-NF-004 | Install and run the agreed reference scenario on clean Windows 10 and Windows 11 environments | Installation, launch and scenario execution succeed on both environments | **Blocked** — clean Windows 10/11 environments were unavailable. |
+| TC-PERF-01 | TMS-NF-001 | Reference scenario: up to 10 intersections / configured 500 vehicles per hour / seed 42 / 1 simulated hour at 1x; measure complete-run FPS | One-hour run completes and average FPS is at least 15 using `(frames - 1) / elapsed wall seconds between first and last paint` | **Passed â€” acceptance-eligible (2026-11-09).** `artifacts/issue12/tc_perf_01_full_run_controlled_retry2_2026-11-09.json`: 3,600.1 simulated seconds, 72,008 frames, 15.96 FPS; all nine acceptance checks true, process exit 0, cleanup succeeded, no input events or storage errors. Earlier failures remain historical. The artifact records an AMD64 Windows 11 host; any separate Intel reference-hardware conformance remains unverified. |
+| TC-REL-01 | TMS-NF-002 | Execute three independently supervised headless simulation-engine runs using seeds 42, 43, and 44; use a 3,600-second simulated duration and 60-second wall-clock timeout per run; verify completion, state consistency, metrics consistency, exception handling, and process cleanup | All three runs pass the approved operational procedure; negative controls are detected; no child processes remain after cleanup | **Passed â€” headless engine reliability (2026-11-11).** All three independent runs passed 20/20 runner checks, exited 0, did not time out, and completed cleanup with no remaining PIDs. The runner-exception and cleanup-failure negative controls were detected. The real process-tree test passed all six checks. Summary: `artifacts/issue12/tc_rel_01/supervisor_reliability_20261111T120702_740960Z.json`. Procedure: `docs/issue12_tc_rel_01_procedure_proposal.md`. GUI, Workbench, and operating-system reliability are not established. |
+| TC-UX-01 | TMS-NF-003 | Conduct the documented human usability evaluation; record participants, task completion, time, and assistance | Meet the documented TC-UX-01 procedure | **Blocked - matrix and evidence missing.** The broad measurable-NFR decision was approved on 2026-10-27, but the human evaluation procedure is not documented and no participant evaluation has been performed. Automated fixture workflow is not UX evidence. |
+| TC-PORT-01 | TMS-NF-004 | Install and run the reference scenario on each Windows version in the explicit installation matrix; record clean-install results | Meet the documented TC-PORT-01 platform matrix | **Blocked - matrix and evidence missing.** The broad measurable-NFR decision was approved on 2026-10-27. Current evidence is from an existing Windows 11 build 26300 environment; clean-install verification for the specified matrix has not been performed. |
 
 ## Execution record template
 
@@ -60,7 +60,7 @@ For each test execution, record:
 
 ## Open dependencies
 
-1. **Issue #1:** Confirm and document any remaining baseline decisions, including NFR criteria, storage/schema and simulation rules.
+1. **Issue #1 / baseline follow-up:** The broad measurable-NFR decision was approved on 2026-10-27 and is recorded in `docs/decisions/0001-baseline-proposal.md`. TC-REL-01 headless reliability procedure and execution are complete. TC-UX-01 human usability evaluation procedure and participant evidence remain outstanding. TC-PORT-01 Windows installation matrix and clean-install verification remain outstanding.
 2. **Issue #2:** Confirm the Python project structure, test framework, test command and module contracts.
 3. Do not invent API names or mark tests passed before execution.
 4. Ensure each invalid fixture is tested against the appropriate validator or importer. Fixtures that contain only a network or signal-plan fragment require a matching test setup; they are not necessarily standalone runnable scenarios.

@@ -1,35 +1,84 @@
 # Issue #12 — System Acceptance Verification
 
-**Verification date:** 2026-10-29
+**Verification update:** 2026-11-11
 
-**Branch:** `issue-12/4x-acceptance` (continuation branch based at `7c072aa523e71617e8da159366efc0e030bdce92`)
+**Branch:** `issue-12/4x-acceptance`
 
-**Base at verification start:** `4e512bf867efe861843e2342289d066c5650594c` (`origin/main`)
+**HEAD inspected:** `5a64be2013aa80844f2909d02e04fe2e8aba67bf` (source/test inspection recorded 2026-11-03; subsequent implementation and documentation changes remain subject to review)
 
-**Environment:** Windows 11 build 26300; Python 3.13.7
+**Latest benchmark environment:** Windows 11 build 26300; Python 3.13.7; seed 42
 
 **Issue status:** Acceptance incomplete; keep Issue #12 open.
+
+**NFR baseline:** The broad measurable-NFR decision was approved by all four teammates on 2026-10-27, as recorded in `docs/decisions/0001-baseline-proposal.md`. The TC-REL-01 operational procedure was subsequently approved by the project owner and collaborator in Issue #12. Three independently supervised headless simulation-engine runs using seeds 42, 43, and 44, each with a 3,600-second simulated duration and a 60-second wall-clock timeout, passed. The runner-exception and cleanup-failure negative controls were detected, and a real process-tree termination test passed. This establishes headless engine-level reliability only; GUI, Workbench, and operating-system reliability are not established. TC-UX-01 still requires human participant evidence, and TC-PORT-01 still requires an explicit Windows installation matrix and clean-install verification.
 
 ## Acceptance results
 
 | Criterion | Status | Actual result and evidence |
 |---|---|---|
-| TC-PERF-01 — 10-intersection, 500-vehicle, one simulated hour at 1x; average >=15 FPS | **INCOMPLETE / BLOCKED** | `artifacts/issue12/tc_perf_01_full_run_retry1.json`: run stopped at 2,123.6/3,600 simulated seconds. The engine clock last advanced at 6,577.85 wall seconds. The final canvas frame was at 6,591.83 seconds; the harness ended at 6,621.94 seconds after more than 30 seconds without a new paint. Incomplete full-interval rate was 6.45 FPS; this is diagnostic only and is not a final pass/fail acceptance measurement. The last samples show the window visible and not minimized. No cause has been reproduced, so no speculative application change was made and no long retry was launched. The earlier invalid attempt is retained at `artifacts/issue12/tc_perf_01_full_run.json`. The short smoke at `artifacts/issue12/gui_smoke2.json` (5.1 simulated seconds) is not acceptance evidence. |
-| TC-REL-01 — three seeded one-hour GUI runs without a crash | **INCOMPLETE / BLOCKED** | The headless evidence remains three completed one-hour runs in `artifacts/issue12/system_checks.json`. New 4x GUI evidence: seed 42 completed one simulated hour (`gui_4x_reliability_seed42.json`); seeds 43 and 44 stopped after mouse presses and recorded `Simulation paused` (`gui_4x_reliability_seed43.json`, `gui_4x_reliability_seed44.json`). These are interrupted attempts, not crashes or completed runs. One GUI run is complete; two of three required runs remain, and the completed run included recorded user input, so three clean interaction-free GUI runs are not established. 4x is diagnostic and does not satisfy TC-PERF-01. |
-| TC-UX-01 — at least 4/5 new users build and run a two-intersection network within 10 minutes | **BLOCKED — human testing not performed** | The automated workflow loaded a saved two-intersection fixture. No new-user participants were available; no human result is claimed. |
-| TC-PORT-01 — install and run on clean Windows 10 and Windows 11 | **BLOCKED — clean environments unavailable** | Only the existing Windows 11 build 26300 environment was used. No clean Windows 10 or clean Windows 11 installation was available. |
-| TC-DEM-02 — same scenario and seed produce identical demand and metrics | **PASS** | `artifacts/issue12/system_checks.json`: seed 42, two runs; demand, all 36,940 metric events, and computed metrics were identical. Required throughput, delay, and queue metrics were non-null. |
-| Analyst workflow — load/setup, save/load, simulate, results, persist, compare, CSV | **PASS — automated fixture workflow** | `artifacts/issue12/system_checks.json`: a 2-intersection/2-segment scenario was saved, exported, imported, and reloaded; two runs were completed, persisted to a temporary SQLite database and reloaded; dashboard values and run comparison were checked; CSV export parsed 20 rows. This exercised the Workbench workflow using a fixture and does not claim manual authoring or usability testing. |
-| Automated tests | **406 assertions passed; process exit abnormal** | Focused suite evidence: 20 passed, exit 0. On this branch, pytest reported 406 passed in 44.57s, then Python emitted a fatal shutdown abort / Windows access violation and exited `-1073741819` (`0xC0000005`). All assertions passed, but the process exit was nonzero. A prior invocation failed before test setup because the sandbox Temp directory could not create pytest temp directories; the successful-assertion run used a worktree-local `--basetemp`. See `docs/test_execution_record.md` and `artifacts/issue12/defect_log.md`. |
+| TC-PERF-01 — 10-intersection reference scenario, one simulated hour at 1x; average >=15 FPS | **PASS — acceptance-eligible** | Latest artifact `artifacts/issue12/tc_perf_01_full_run_controlled_retry2_2026-11-09.json`: finished 3,600.1 simulated seconds for a 3,600-second request at requested and actual 1.0x; 72,008 frames over 4,510.687 seconds; `(72,008 - 1) / 4,510.687 = 15.96 FPS`. `acceptance_eligible=true`; all nine acceptance checks are true; process exit 0; cleanup succeeded; zero input events, unexpected external input, storage errors, or ambiguous input records. The 2026-11-03 13.25 FPS run and other failed/ineligible attempts remain historical evidence, not the latest result. |
+| TC-REL-01 — reliability | **PASS — headless engine reliability** | Approved procedure: `docs/issue12_tc_rel_01_procedure_proposal.md`. Three independent supervised child-process runs using seeds 42, 43, and 44 each simulated 3,600 seconds and passed all 20 runner checks; all exited 0 within the approved 60-second timeout. No failed checks or remaining child PIDs. Summary: `artifacts/issue12/tc_rel_01/supervisor_reliability_20261111T120702_740960Z.json`; individual runner JSON files are referenced in the summary. Runner-exception and cleanup-failure negative controls were detected, and the real process-tree test passed all six checks. This establishes headless engine-level reliability only, not GUI, Workbench, or operating-system reliability. |
+| TC-UX-01 — usability | **BLOCKED — procedure and human evidence incomplete** | No new-user participants were tested. A documented human usability evaluation procedure and actual participant evidence are still required. The automated fixture workflow is not usability evidence. |
+| TC-PORT-01 — Windows portability | **BLOCKED — installation matrix and evidence incomplete** | The benchmark and tests ran on the existing Windows 11 build 26300 host. There is no clean Windows installation evidence. An explicit Windows installation matrix and clean-install verification evidence are still required. |
+| TC-DEM-02 — same scenario and seed produce identical demand and metrics | **PASS — automated evidence** | `artifacts/issue12/system_checks.json`: seed 42, two independent runs; demand, all 36,940 metric events, and all reported metrics matched; throughput, delay, and queue metrics were non-null. |
+| Analyst workflow — network fixture setup, save/load, simulation, results, persistence, comparison, CSV | **PASS — automated fixture integration only** | `artifacts/issue12/system_checks.json`: a 2-intersection/2-segment fixture was saved, exported, imported, and reloaded; two Workbench runs were completed and persisted to a temporary SQLite database; stored runs were reloaded/compared, dashboard values checked, and CSV parsed as 20 rows. No manual network authoring or human usability is claimed. |
+| Automated tests | **PASS — 457 passed, process exit 0 (historical verification)** | After adding the TC-PERF-01 one-hour/1x artifact-eligibility guard: full suite 457 passed in 28.06s, exit 0; focused acceptance/UI/engine suite 83 passed, exit 0. Compilation and diff checks passed at that verification. These are previously recorded results, not a new full-suite execution on 2026-11-11. Exact commands are recorded in `docs/test_execution_record.md`. |
 
 ## Metric definitions
 
 - Analytical queue length counts vehicles with measured speed **below 0.5 m/s**. The GUI queue overlay and vehicle highlighting use a separate **1.0 m/s** visual cue and are not the reported queue metric.
 - Delay is the mean of `max(0, completed_trip_time - speed_limit_free_flow_time)`. Free-flow time uses route distance and each segment's speed limit. Only uniquely matched completed trips contribute; incomplete trips are excluded.
 - The approved FPS measurement is `(total_frames - 1) / elapsed_wall_seconds` across the complete run. Rolling FPS, headless throughput, short smoke runs, and partial-run averages cannot establish TC-PERF-01.
+- Older 30-second diagnostic artifacts (`tc_perf_01_diagnostic_pause_provenance_30s.json` and `tc_perf_01_diagnostic_30s_fix_validation.json`) were produced before the finalizer checked the TC-PERF-01 one-hour/1x configuration and contain a legacy `acceptance_eligible=true`. They are preserved unchanged and are not acceptance evidence. The current finalizer now requires at least 3,600 requested simulated seconds at exactly 1x; regression tests cover short and non-1x artifacts.
 
 ## Database isolation and limits
 
 `measure_gui_fps.py` assigns each benchmark a fresh `TemporaryDirectory` SQLite history database before simulation and removes it after exit. `scripts/issue12_system_checks.py` also uses a temporary SQLite database for the Workbench flow. Pytest uses isolated temporary storage fixtures. These checks did not use or modify existing user run-history data.
 
-The prior 1x GUI attempt stalled at 2,123.6 simulated seconds while visible and not minimized; that older trace lacks the input and engine-state instrumentation needed to determine its cause. Later 4x attempts for seeds 43 and 44 recorded mouse presses followed by `Simulation paused`; seed 42 completed a full simulated hour. The new evidence points to user/window interaction as the cause of those two later interruptions, but does not explain the earlier 1x stall. No reproducible application rendering defect is established and no speculative application change was made. The 4x runs are diagnostic, not performance acceptance evidence. TC-PERF-01, TC-REL-01, TC-UX-01, and TC-PORT-01 remain unresolved; Issue #12 must remain open.
+The latest 1x run, recorded on 2026-11-09, passed TC-PERF-01 at 15.96 FPS with all eligibility checks true and no external input. The 2026-11-03 13.25 FPS result and subsequent below-target or ineligible attempts remain preserved as historical evidence; they are not substituted for the latest result. The earlier 4x seed-43/44 attempts remain interrupted evidence; 4x does not satisfy TC-PERF-01. The latest artifact records Windows 11 build 26300 and an AMD64 processor; conformance to any separately specified Intel reference hardware has not been established by this run.
+
+## TC-REL-01 reliability evidence details
+
+The approved operational procedure is documented in `docs/issue12_tc_rel_01_procedure_proposal.md`.
+
+| Run | Seed | Result | Runner checks | Exit code | Supervisor wall time |
+|---|---:|---|---:|---:|---:|
+| 1 | 42 | PASS | 20/20 | 0 | 3.186 s |
+| 2 | 43 | PASS | 20/20 | 0 | 3.179 s |
+| 3 | 44 | PASS | 20/20 | 0 | 2.222 s |
+
+All three runs:
+- Simulated the approved 3,600-second duration.
+- Completed without timing out against the 60-second wall-clock limit.
+- Had zero failed runner checks.
+- Completed process cleanup successfully.
+- Reaped the parent process.
+- Left no remaining child process IDs.
+
+Additional supervisor validation:
+
+- **Runner-exception negative control:** PASS. The injected runner exception was recorded, the child exited nonzero, and cleanup succeeded. Evidence: `artifacts/issue12/tc_rel_01/supervisor_negative-exception_20261111T120254_219514Z.json`.
+- **Cleanup-failure negative control:** PASS. The injected cleanup failure was detected and recorded by the supervisor. Evidence: `artifacts/issue12/tc_rel_01/supervisor_negative-cleanup_20261111T120300_129914Z.json`. This is a synthetic failure injection after the cleanup attempt; it verifies error recording, not a naturally occurring operating-system cleanup failure.
+- **Real process-tree test:** PASS. The parent timed out, its child was discovered, both processes were terminated, the parent was reaped, and neither PID remained. All six checks passed. Evidence: `artifacts/issue12/tc_rel_01/supervisor_process-tree-test_20261111T120631_004465Z.json`.
+
+**Scope limitation:** TC-REL-01 establishes headless simulation-engine reliability only. It does not establish GUI, Workbench, or operating-system reliability. This deviation is recorded in `DEVIATIONS.md`.
+
+## Acceptance disposition
+
+The broad measurable-NFR decision is approved as recorded in `docs/decisions/0001-baseline-proposal.md`. The SRS/SAD/STP owners still need to incorporate the approved decisions into those documents.
+
+- TC-PERF-01: **PASS**
+- TC-REL-01: **PASS — headless engine reliability only**
+- TC-DEM-02: **PASS — automated evidence**
+- Analyst workflow: **PASS — automated fixture integration only**
+- Automated tests: **PASS — 457 previously recorded full-suite passes**
+- TC-UX-01: **BLOCKED — human evaluation and participant evidence outstanding**
+- TC-PORT-01: **BLOCKED — Windows installation matrix and clean-install verification outstanding**
+
+Issue #12 remains open because TC-UX-01 and TC-PORT-01 are unresolved. No files were pushed, no pull request was created, and no issue was closed by this verification update.
+
+## Sign-off
+
+- Tester: Pending
+- Reviewer: Pending
+- Final acceptance: Pending

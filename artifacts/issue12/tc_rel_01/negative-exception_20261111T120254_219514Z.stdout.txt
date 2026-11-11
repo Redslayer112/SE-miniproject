@@ -1,0 +1,1 @@
+{"seed": 42, "status": "Failed", "output": "C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject-main\\issue12-4x-work\\artifacts\\issue12\\tc_rel_01\\negative-exception_20261111T120254_219514Z.json", "wall_clock_seconds": 0.4979086000003008}

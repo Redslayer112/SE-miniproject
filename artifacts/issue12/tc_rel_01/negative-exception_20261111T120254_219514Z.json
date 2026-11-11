@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "run_id": "5ce2ef5e-5630-490c-9b02-bdd2215c8ba7",
+  "seed": 42,
+  "status": "Failed",
+  "started_at_utc": "2026-11-11T12:02:55.644168+00:00",
+  "finished_at_utc": "2026-11-11T12:02:56.142101+00:00",
+  "exception": {
+    "stage": "simulation_execution",
+    "type": "RuntimeError",
+    "message": "TC-REL-01 injected runner exception at simulation_execution",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject-main\\issue12-4x-work\\scripts\\issue12_tc_rel_01_runner.py\", line 292, in run_simulation\n    raise RuntimeError(\n    ...<2 lines>...\n    )\nRuntimeError: TC-REL-01 injected runner exception at simulation_execution\n",
+    "timestamp_utc": "2026-11-11T12:02:56.142076+00:00"
+  },
+  "scenario": {
+    "path": "fixtures\\valid\\performance_10_intersections.json",
+    "sha256": "45e0f5108432004f3c2afa0b74bdc2bf77156d6762b2486f7326aa9018ae09ca",
+    "scenario_id": "performance-10-intersections-001",
+    "requested_duration_s": 2.0,
+    "original_fixture_duration_s": 3600,
+    "time_step_s": 0.1
+  },
+  "environment": {
+    "code_revision": "5a64be2013aa80844f2909d02e04fe2e8aba67bf",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "executable": "C:\\Users\\vikhy\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+  },
+  "engine": {},
+  "metrics": {},
+  "checks": [],
+  "cleanup": {
+    "status": "not_applicable",
+    "errors": []
+  },
+  "wall_clock_seconds": 0.4979086000003008
+}

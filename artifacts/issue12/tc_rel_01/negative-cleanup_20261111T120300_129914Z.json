@@ -1,0 +1,485 @@
+{
+  "schema_version": 1,
+  "run_id": "6c6a7266-6864-4a93-a151-ed392c8076db",
+  "seed": 42,
+  "status": "Passed",
+  "started_at_utc": "2026-11-11T12:03:00.524491+00:00",
+  "finished_at_utc": "2026-11-11T12:03:00.918878+00:00",
+  "exception": null,
+  "scenario": {
+    "path": "fixtures\\valid\\performance_10_intersections.json",
+    "sha256": "45e0f5108432004f3c2afa0b74bdc2bf77156d6762b2486f7326aa9018ae09ca",
+    "scenario_id": "performance-10-intersections-001",
+    "requested_duration_s": 2.0,
+    "original_fixture_duration_s": 3600,
+    "time_step_s": 0.1
+  },
+  "environment": {
+    "code_revision": "5a64be2013aa80844f2909d02e04fe2e8aba67bf",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "executable": "C:\\Users\\vikhy\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+  },
+  "engine": {
+    "finished": true,
+    "running": false,
+    "time_s": 2.0000000000000004,
+    "duration_s": 2.0,
+    "time_step_s": 0.1,
+    "scheduled_vehicle_count": 0,
+    "spawn_event_count": 0,
+    "exit_event_count": 0,
+    "active_vehicle_count": 0,
+    "exited_vehicle_count": 0,
+    "scheduled_vehicle_ids": [],
+    "spawn_vehicle_ids": [],
+    "exit_vehicle_ids": [],
+    "active_vehicle_ids": [],
+    "exited_vehicle_ids": [],
+    "metric_event_count": 20
+  },
+  "metrics": {
+    "recorded": {
+      "status": "Completed",
+      "simulated_time": 2.0000000000000004,
+      "duration": 2.0,
+      "vehicles_generated": 0,
+      "total_scheduled": 0,
+      "vehicles_entered": 0,
+      "vehicles_completed": 0,
+      "vehicles_in_network": 0,
+      "mean_travel_time": null,
+      "average_speed_mps": null,
+      "throughput_vph": 0.0,
+      "average_delay_s": null,
+      "maximum_delay_s": null,
+      "queue_length_veh": 0.0,
+      "average_queue_length_by_approach": {
+        "R1": 0.0,
+        "R10": 0.0,
+        "R2": 0.0,
+        "R3": 0.0,
+        "R4": 0.0,
+        "R5": 0.0,
+        "R6": 0.0,
+        "R7": 0.0,
+        "R8": 0.0,
+        "R9": 0.0
+      }
+    },
+    "recomputed": {
+      "status": "Completed",
+      "simulated_time": 2.0000000000000004,
+      "duration": 2.0,
+      "vehicles_generated": 0,
+      "total_scheduled": 0,
+      "vehicles_entered": 0,
+      "vehicles_completed": 0,
+      "vehicles_in_network": 0,
+      "mean_travel_time": null,
+      "average_speed_mps": null,
+      "throughput_vph": 0.0,
+      "average_delay_s": null,
+      "maximum_delay_s": null,
+      "queue_length_veh": 0.0,
+      "average_queue_length_by_approach": {
+        "R1": 0.0,
+        "R10": 0.0,
+        "R2": 0.0,
+        "R3": 0.0,
+        "R4": 0.0,
+        "R5": 0.0,
+        "R6": 0.0,
+        "R7": 0.0,
+        "R8": 0.0,
+        "R9": 0.0
+      }
+    },
+    "comparison": [
+      {
+        "name": "metrics.keys",
+        "expected": [
+          "average_delay_s",
+          "average_queue_length_by_approach",
+          "average_speed_mps",
+          "duration",
+          "maximum_delay_s",
+          "mean_travel_time",
+          "queue_length_veh",
+          "simulated_time",
+          "status",
+          "throughput_vph",
+          "total_scheduled",
+          "vehicles_completed",
+          "vehicles_entered",
+          "vehicles_generated",
+          "vehicles_in_network"
+        ],
+        "actual": [
+          "average_delay_s",
+          "average_queue_length_by_approach",
+          "average_speed_mps",
+          "duration",
+          "maximum_delay_s",
+          "mean_travel_time",
+          "queue_length_veh",
+          "simulated_time",
+          "status",
+          "throughput_vph",
+          "total_scheduled",
+          "vehicles_completed",
+          "vehicles_entered",
+          "vehicles_generated",
+          "vehicles_in_network"
+        ],
+        "passed": true
+      },
+      {
+        "name": "metrics.average_delay_s",
+        "expected": null,
+        "actual": null,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.keys",
+        "expected": [
+          "R1",
+          "R10",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8",
+          "R9"
+        ],
+        "actual": [
+          "R1",
+          "R10",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8",
+          "R9"
+        ],
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R1",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R10",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R2",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R3",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R4",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R5",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R6",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R7",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R8",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_queue_length_by_approach.R9",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.average_speed_mps",
+        "expected": null,
+        "actual": null,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.duration",
+        "expected": 2.0,
+        "actual": 2.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.maximum_delay_s",
+        "expected": null,
+        "actual": null,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.mean_travel_time",
+        "expected": null,
+        "actual": null,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.queue_length_veh",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.simulated_time",
+        "expected": 2.0000000000000004,
+        "actual": 2.0000000000000004,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.status",
+        "expected": "Completed",
+        "actual": "Completed",
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.throughput_vph",
+        "expected": 0.0,
+        "actual": 0.0,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "name": "metrics.total_scheduled",
+        "expected": 0,
+        "actual": 0,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.vehicles_completed",
+        "expected": 0,
+        "actual": 0,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.vehicles_entered",
+        "expected": 0,
+        "actual": 0,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.vehicles_generated",
+        "expected": 0,
+        "actual": 0,
+        "tolerance": null,
+        "passed": true
+      },
+      {
+        "name": "metrics.vehicles_in_network",
+        "expected": 0,
+        "actual": 0,
+        "tolerance": null,
+        "passed": true
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "recorded_metrics_match_recomputed",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "engine_finished",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "metrics_status",
+      "expected": "Completed",
+      "actual": "Completed",
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "engine_not_running",
+      "expected": false,
+      "actual": false,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "simulation_duration",
+      "expected": {
+        "minimum": 1.999999,
+        "maximum": 2.1000010000000002
+      },
+      "actual": 2.0000000000000004,
+      "tolerance": 1e-06,
+      "passed": true
+    },
+    {
+      "name": "scheduled_vehicle_ids_unique",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "spawn_ids_unique",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "exit_ids_unique",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "no_orphan_exit_ids",
+      "expected": [],
+      "actual": [],
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "scheduled_demand_accounting",
+      "expected": 0,
+      "actual": 0,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "spawn_count_matches_entered",
+      "expected": 0,
+      "actual": 0,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "completed_ids_match_completed_count",
+      "expected": 0,
+      "actual": 0,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "active_count_matches_engine_cars",
+      "expected": 0,
+      "actual": 0,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "vehicle_conservation",
+      "expected": 0,
+      "actual": 0,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "exited_state_matches_completed",
+      "expected": 0,
+      "actual": 0,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "active_ids_unique",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "exited_ids_unique",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "active_and_exited_ids_disjoint",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "metrics_are_finite",
+      "expected": [],
+      "actual": [],
+      "tolerance": null,
+      "passed": true
+    },
+    {
+      "name": "metrics_counts_are_bounded",
+      "expected": true,
+      "actual": true,
+      "tolerance": null,
+      "passed": true
+    }
+  ],
+  "cleanup": {
+    "status": "not_applicable",
+    "errors": []
+  },
+  "wall_clock_seconds": 0.39437509999879694
+}

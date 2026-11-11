@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "test_case": "TC-REL-01",
+  "mode": "negative-exception",
+  "status": "Passed",
+  "started_at_utc": "2026-11-11T12:02:54.219639+00:00",
+  "finished_at_utc": "2026-11-11T12:02:56.292468+00:00",
+  "expected_observation": "Injected runner exception was recorded, the child exited nonzero, and cleanup succeeded.",
+  "negative_control_detected": true,
+  "run": {
+    "seed": 42,
+    "requested_duration_s": 2.0,
+    "timeout_seconds": 60.0,
+    "started_at_utc": "2026-11-11T12:02:54.219639+00:00",
+    "finished_at_utc": "2026-11-11T12:02:56.292121+00:00",
+    "pid": 6028,
+    "exit_code": 1,
+    "timed_out": false,
+    "runner_status": "Failed",
+    "runner_output": {
+      "status": "Failed",
+      "exception": {
+        "stage": "simulation_execution",
+        "type": "RuntimeError",
+        "message": "TC-REL-01 injected runner exception at simulation_execution",
+        "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\vikhy\\OneDrive\\Documents\\Desktop\\sem-5\\ALL-LAB\\SE-LAB\\SE-miniproject-main\\issue12-4x-work\\scripts\\issue12_tc_rel_01_runner.py\", line 292, in run_simulation\n    raise RuntimeError(\n    ...<2 lines>...\n    )\nRuntimeError: TC-REL-01 injected runner exception at simulation_execution\n",
+        "timestamp_utc": "2026-11-11T12:02:56.142076+00:00"
+      },
+      "wall_clock_seconds": 0.4979086000003008,
+      "check_count": 0,
+      "failed_checks": []
+    },
+    "stdout_file": "artifacts\\issue12\\tc_rel_01\\negative-exception_20261111T120254_219514Z.stdout.txt",
+    "stderr_file": "artifacts\\issue12\\tc_rel_01\\negative-exception_20261111T120254_219514Z.stderr.txt",
+    "runner_json": "artifacts\\issue12\\tc_rel_01\\negative-exception_20261111T120254_219514Z.json",
+    "cleanup": {
+      "initial_pid": 6028,
+      "descendant_pids": [],
+      "terminated_pids": [],
+      "killed_pids": [],
+      "graceful_wait_seconds": 5.0,
+      "force_wait_seconds": 5.0,
+      "parent_reaped": true,
+      "remaining_pids": [],
+      "status": "Passed",
+      "errors": []
+    },
+    "supervisor_status": "Failed",
+    "exception": null,
+    "supervisor_wall_clock_seconds": 2.0724886000007245
+  },
+  "note": "Negative controls use a short 2-second simulation. They are not acceptance runs."
+}

@@ -1,7 +1,9 @@
 ﻿
 import argparse
 import copy
+import ctypes
 from datetime import datetime, timezone
+from collections import deque
 import logging
 import platform
 import shutil
@@ -9,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import json
+import math
 import tempfile
 import time
 from pathlib import Path
@@ -22,7 +25,8 @@ try:
 except ImportError:  # Process RSS is supplemental; the benchmark itself has no extra dependency.
     psutil = None
 
-from PySide6.QtCore import QEvent, QObject, QTimer
+from PySide6.QtCore import QAbstractNativeEventFilter, QEvent, QObject, QTimer
+from PySide6.QtGui import QWindow
 from PySide6.QtWidgets import QApplication
 
 from tms_sim.ui.app import Workbench
@@ -31,6 +35,38 @@ from tms_sim.ui.app import Workbench
 DEFAULT_SCENARIO = ROOT / "fixtures/valid/performance_10_intersections.json"
 DEFAULT_OUTPUT = ROOT / "artifacts/gui_fps_full_run.json"
 SUPPORTED_SPEEDS = (0.5, 1.0, 2.0, 4.0)
+CLOSE_DIAGNOSTIC_CONTEXT_SECONDS = 10.0
+MAX_NON_CLIENT_MOUSE_EVENTS = 128
+MAX_WINDOWS_CLOSE_MESSAGES = 64
+
+WM_CLOSE = 0x0010
+WM_QUERYENDSESSION = 0x0011
+WM_ENDSESSION = 0x0016
+WM_SYSCOMMAND = 0x0112
+SC_CLOSE = 0xF060
+
+WINDOWS_CLOSE_MESSAGE_NAMES = {
+    WM_CLOSE: "WM_CLOSE",
+    WM_QUERYENDSESSION: "WM_QUERYENDSESSION",
+    WM_ENDSESSION: "WM_ENDSESSION",
+}
+
+
+class _WindowsPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_int32), ("y", ctypes.c_int32)]
+
+
+class _WindowsMessage(ctypes.Structure):
+    """Pointer-sized subset of Win32 MSG used by the benchmark's passive filter."""
+
+    _fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("message", ctypes.c_uint32),
+        ("wParam", ctypes.c_size_t),
+        ("lParam", ctypes.c_ssize_t),
+        ("time", ctypes.c_uint32),
+        ("pt", _WindowsPoint),
+    ]
 
 
 def measurement_failure_reason(
@@ -55,36 +91,32 @@ def measurement_failure_reason(
 
 
 class InputEventRecorder(QObject):
-    """Record input deliveries and flag ambiguous Qt propagation matches.
+    """Keep canonical Qt input records separate from per-target delivery traces.
 
-    A spontaneous event originated outside the application, but Qt does not say
-    whether that source was a person, window management, or automation.
+    Qt does not expose a portable native-action identity. A spontaneous event
+    seen at a QWindow is counted once as a canonical Qt ingress; every callback
+    remains in ``delivery_traces``. Spontaneous non-window deliveries remain
+    trace-only and uncertain, so they cannot silently disappear from eligibility.
+    No event is merged by metadata.
     """
 
-    def __init__(self):
+    def __init__(self, window=None, close_input_context_seconds: float = 10.0):
         super().__init__()
+        self.window = window
+        self.close_input_context_seconds = close_input_context_seconds
         self.started_at = None
+        # ``events`` remains the artifact's legacy canonical-input field.
         self.events = []
-        self._active_events = {}
+        self.delivery_traces = []
+        self.window_close_events = []
+        self._close_event_by_token = {}
+        self._next_close_event_id = 1
+        self.non_client_mouse_events = deque(maxlen=MAX_NON_CLIENT_MOUSE_EVENTS)
+        self.windows_native_recorder = None
         self._target_identity_by_object = {}
         self._target_references = {}
         self._next_target_id = 1
         self._next_event_id = 1
-
-    @staticmethod
-    def _may_be_propagated_to_ancestor(watched, previous_target):
-        """Return whether a matching delivery could be parent propagation.
-
-        This is only a heuristic: Qt does not expose a stable identifier that
-        links cloned events during QWidget propagation. Callers must preserve
-        both deliveries and mark the association uncertain.
-        """
-        parent = previous_target.parent() if hasattr(previous_target, "parent") else None
-        while parent is not None:
-            if parent is watched:
-                return True
-            parent = parent.parent() if hasattr(parent, "parent") else None
-        return False
 
     def _target_record(self, watched):
         object_key = id(watched)
@@ -120,30 +152,6 @@ class InputEventRecorder(QObject):
         }
 
     @staticmethod
-    def _event_key(event):
-        timestamp = int(event.timestamp()) if hasattr(event, "timestamp") else None
-        if hasattr(event, "key"):
-            payload = (
-                int(event.key()),
-                int(event.nativeScanCode()),
-                int(event.nativeVirtualKey()),
-                int(event.nativeModifiers()),
-                event.text(),
-                bool(event.isAutoRepeat()),
-            )
-        elif hasattr(event, "button"):
-            position = event.globalPosition() if hasattr(event, "globalPosition") else event.position()
-            payload = (
-                int(event.button().value),
-                int(event.buttons().value),
-                float(position.x()),
-                float(position.y()),
-            )
-        else:
-            payload = ()
-        return int(event.type()), timestamp, bool(event.spontaneous()), payload
-
-    @staticmethod
     def _input_metadata(event):
         def enum_value(value):
             return int(value.value if hasattr(value, "value") else value)
@@ -174,20 +182,31 @@ class InputEventRecorder(QObject):
         return metadata
 
     def eventFilter(self, watched, event):
-        if self.started_at is not None and event.type() in (
+        if (
+            self.started_at is not None
+            and watched is self.window
+            and event.type() == QEvent.Type.Close
+        ):
+            event_token = f"close-{self._next_close_event_id:06d}"
+            self._next_close_event_id += 1
+            watched._benchmark_close_event_tokens.append(event_token)
+            self._record_window_close(watched, event, event_token)
+        elif (
+            self.started_at is not None
+            and self._is_workbench_native_target(watched)
+            and event.type() in NON_CLIENT_MOUSE_EVENT_NAMES
+        ):
+            self._record_non_client_mouse_event(watched, event)
+        elif self.started_at is not None and event.type() in (
             QEvent.Type.KeyPress,
             QEvent.Type.MouseButtonPress,
         ):
-            key = self._event_key(event)
-            active = self._active_events.get(key)
-            possible_propagation = active is not None and self._may_be_propagated_to_ancestor(
-                watched, active["last_target"]
-            )
             spontaneous = bool(event.spontaneous())
             target = self._target_record(watched)
             delivery_id = self._next_event_id
             self._next_event_id += 1
-            record = {
+            is_window_ingress = isinstance(watched, QWindow) and spontaneous
+            trace = {
                 "delivery_id": delivery_id,
                 "elapsed_wall_seconds": round(time.perf_counter() - self.started_at, 3),
                 "event_type": (
@@ -198,34 +217,262 @@ class InputEventRecorder(QObject):
                 "origin": "external_system" if spontaneous else "internal_application",
                 "spontaneous": spontaneous,
                 "unexpected_external_input": spontaneous,
-                "identity_uncertain": bool(possible_propagation),
-                "possible_propagation_of_delivery_id": (
-                    active["record"]["delivery_id"] if possible_propagation else None
-                ),
-                "delivery_targets": [target],
+                "identity_uncertain": spontaneous,
+                "canonical_event_id": None,
+                "target": target,
                 **self._input_metadata(event),
             }
-            if possible_propagation:
-                active["record"]["identity_uncertain"] = True
-                active["record"].setdefault(
-                    "possible_propagation_delivery_ids", []
-                ).append(delivery_id)
-            self.events.append(record)
-
-            # Do not merge on matching metadata: propagated Qt deliveries can
-            # be clones, and a separate event can have the same signature.
-            # Retain a short-lived candidate only to annotate uncertainty.
-            current = {"record": record, "last_target": watched}
-            self._active_events[key] = current
-            QTimer.singleShot(
-                0,
-                lambda event_key=key, active_event=current: (
-                    self._active_events.pop(event_key, None)
-                    if self._active_events.get(event_key) is active_event
-                    else None
-                ),
-            )
+            if spontaneous:
+                trace["classification"] = (
+                    "platform_window_ingress" if is_window_ingress
+                    else "unattributed_external_delivery"
+                )
+                if is_window_ingress:
+                    # This is a canonical Qt window ingress, not proof of one
+                    # physical/human action. Preserve that limitation explicitly.
+                    canonical_event_id = len(self.events) + 1
+                    self.events.append({
+                        **trace,
+                        "event_id": canonical_event_id,
+                        "canonical_event_id": canonical_event_id,
+                        "delivery_id": delivery_id,
+                        "native_event_identity_available": False,
+                        "identity_uncertain": True,
+                        "identity_uncertainty_reason": (
+                            "Qt does not expose a portable native input-action identity"
+                        ),
+                        "delivery_targets": [target],
+                    })
+                    trace["canonical_event_id"] = canonical_event_id
+            else:
+                trace["classification"] = "internal_application_delivery"
+            self.delivery_traces.append(trace)
         return False
+
+    def _is_workbench_native_target(self, watched):
+        if watched is self.window:
+            return True
+        try:
+            return watched == self.window.windowHandle()
+        except (AttributeError, RuntimeError):
+            return False
+
+    def _record_non_client_mouse_event(self, watched, event):
+        elapsed = round(time.perf_counter() - self.started_at, 3)
+        event_name = NON_CLIENT_MOUSE_EVENT_NAMES[event.type()]
+        record = {
+            "elapsed_wall_seconds": elapsed,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "event_type": event_name,
+            "origin": "external_system" if event.spontaneous() else "internal_application",
+            "spontaneous": bool(event.spontaneous()),
+            "identity_uncertain": bool(event.spontaneous()),
+            "target": self._target_record(watched),
+            **self._input_metadata(event),
+        }
+        self.non_client_mouse_events.append(record)
+        self._correlate_following_non_client_event(record)
+
+    def _correlate_following_non_client_event(self, record):
+        elapsed = record["elapsed_wall_seconds"]
+        for close in reversed(self.window_close_events):
+            delta = elapsed - close["elapsed_wall_seconds"]
+            if (
+                0 <= delta <= self.close_input_context_seconds
+                and record.get("close_event_token") is None
+            ):
+                record["close_event_token"] = close["event_token"]
+                record["correlation_direction"] = "following"
+                close.setdefault("following_non_client_mouse_events", []).append(dict(record))
+                return
+
+    def _record_window_close(self, window, event, event_token):
+        """Capture state and nearby input evidence without inferring who closed the window."""
+        elapsed = round(time.perf_counter() - self.started_at, 3)
+        engine = getattr(window, "engine", None)
+        focused = None
+        try:
+            focus_widget = window.focusWidget()
+            if focus_widget is not None:
+                focused = {
+                    "class_name": type(focus_widget).__name__,
+                    "object_name": focus_widget.objectName(),
+                }
+        except (AttributeError, RuntimeError):
+            pass
+
+        initiator = getattr(window, "_pending_close_initiator", None)
+        context_start = elapsed - self.close_input_context_seconds
+        preceding_non_client_events = []
+        for input_record in self.non_client_mouse_events:
+            if (
+                context_start <= input_record["elapsed_wall_seconds"] <= elapsed
+                and input_record.get("close_event_token") is None
+            ):
+                input_record["close_event_token"] = event_token
+                input_record["correlation_direction"] = "preceding"
+                preceding_non_client_events.append(dict(input_record))
+        record = {
+            "event_token": event_token,
+            "elapsed_wall_seconds": elapsed,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "event_type": "close",
+            "event_spontaneous": (
+                bool(event.spontaneous()) if hasattr(event, "spontaneous") else None
+            ),
+            "initiator_status": (
+                "known_application_action" if initiator else "unknown"
+            ),
+            "initiator": initiator or "unknown",
+            "window_state": {
+                "visible": bool(window.isVisible()),
+                "minimized": bool(window.isMinimized()),
+                "active": bool(window.isActiveWindow()),
+            },
+            "focused_widget": focused,
+            "engine_running": bool(getattr(engine, "running", False)),
+            "simulation_time_s": round(float(getattr(engine, "time", 0.0)), 3)
+            if engine is not None else None,
+            "preceding_input_context_seconds": self.close_input_context_seconds,
+            "preceding_input_events": [
+                dict(record) for record in self.events
+                if context_start <= record.get("elapsed_wall_seconds", -1) <= elapsed
+            ],
+            "preceding_input_delivery_traces": [
+                dict(record) for record in self.delivery_traces
+                if context_start <= record.get("elapsed_wall_seconds", -1) <= elapsed
+            ],
+            "preceding_non_client_mouse_events": preceding_non_client_events,
+            "preceding_native_close_messages": (
+                self.windows_native_recorder.correlate_preceding_close_messages(
+                    event_token, elapsed, self.close_input_context_seconds
+                ) if self.windows_native_recorder is not None else []
+            ),
+        }
+        self.window_close_events.append(record)
+        self._close_event_by_token[event_token] = record
+
+    def record_close_outcome(self, event_token: str | None, accepted: bool):
+        """Attach a close handler's outcome to the matching event token."""
+        record = self._close_event_by_token.get(event_token)
+        if record is not None:
+            record["close_event_accepted"] = bool(accepted)
+
+    def non_client_mouse_event_records(self):
+        return [dict(record) for record in self.non_client_mouse_events]
+
+
+NON_CLIENT_MOUSE_EVENT_NAMES = {
+    event_type: name
+    for name in (
+        "NonClientAreaMouseButtonPress",
+        "NonClientAreaMouseButtonRelease",
+        "NonClientAreaMouseButtonDblClick",
+    )
+    if (event_type := getattr(QEvent.Type, name, None)) is not None
+}
+
+
+class WindowsCloseEventRecorder(QAbstractNativeEventFilter):
+    """Bounded, passive observer for close-related Win32 messages on the Workbench HWND."""
+
+    def __init__(self, input_recorder: InputEventRecorder, window):
+        super().__init__()
+        self.input_recorder = input_recorder
+        self.window_handle = int(window.winId())
+        self.events = deque(maxlen=MAX_WINDOWS_CLOSE_MESSAGES)
+        self.parse_errors = 0
+
+    @staticmethod
+    def _event_type_name(event_type):
+        data = event_type.data() if hasattr(event_type, "data") else event_type
+        if isinstance(data, (bytes, bytearray)):
+            return data.decode("ascii", errors="replace")
+        return str(data)
+
+    @staticmethod
+    def _message_address(message):
+        if isinstance(message, ctypes.c_void_p):
+            return message.value
+        return int(message)
+
+    @staticmethod
+    def _message_name(message_id, wparam):
+        if message_id == WM_SYSCOMMAND:
+            return "WM_SYSCOMMAND/SC_CLOSE" if (wparam & 0xFFF0) == SC_CLOSE else None
+        return WINDOWS_CLOSE_MESSAGE_NAMES.get(message_id)
+
+    def nativeEventFilter(self, event_type, message):
+        """Observe matching messages and always return false so Qt handles them normally."""
+        event_type_name = self._event_type_name(event_type)
+        if event_type_name not in {"windows_generic_MSG", "windows_dispatcher_MSG"}:
+            return False, 0
+        if self.input_recorder.started_at is None:
+            return False, 0
+        try:
+            message_pointer = ctypes.cast(
+                self._message_address(message), ctypes.POINTER(_WindowsMessage)
+            )
+            native_message = message_pointer.contents
+            self.record_message(
+                event_type_name=event_type_name,
+                hwnd=int(native_message.hwnd or 0),
+                message_id=int(native_message.message),
+                wparam=int(native_message.wParam),
+                lparam=int(native_message.lParam),
+            )
+        except Exception:
+            self.parse_errors += 1
+        return False, 0
+
+    def record_message(self, *, event_type_name, hwnd, message_id, wparam, lparam):
+        """Record one recognized message for the benchmark Workbench without consuming it."""
+        name = self._message_name(message_id, wparam)
+        if name is None or hwnd != self.window_handle:
+            return None
+        started_at = self.input_recorder.started_at
+        if started_at is None:
+            return None
+        record = {
+            "elapsed_wall_seconds": round(time.perf_counter() - started_at, 3),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "event_type": event_type_name,
+            "message_name": name,
+            "message_id": f"0x{message_id:04X}",
+            "hwnd": f"0x{hwnd:X}",
+            "wParam": f"0x{wparam:X}",
+            "lParam": f"0x{lparam & ((1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1):X}",
+            "close_event_token": None,
+        }
+        self.events.append(record)
+        self._correlate_following_message(record)
+        return record
+
+    def correlate_preceding_close_messages(self, event_token, close_elapsed, context_seconds):
+        context_start = close_elapsed - context_seconds
+        matched = []
+        for record in self.events:
+            if (
+                context_start <= record["elapsed_wall_seconds"] <= close_elapsed
+                and record["close_event_token"] is None
+            ):
+                record["close_event_token"] = event_token
+                record["correlation_direction"] = "preceding"
+                matched.append(dict(record))
+        return matched
+
+    def _correlate_following_message(self, record):
+        elapsed = record["elapsed_wall_seconds"]
+        for close in reversed(self.input_recorder.window_close_events):
+            delta = elapsed - close["elapsed_wall_seconds"]
+            if (
+                0 <= delta <= self.input_recorder.close_input_context_seconds
+                and record["close_event_token"] is None
+            ):
+                record["close_event_token"] = close["event_token"]
+                record["correlation_direction"] = "following"
+                close.setdefault("following_native_close_messages", []).append(dict(record))
+                return
 
 
 def acceptance_eligibility(
@@ -289,6 +536,11 @@ def cleanup_benchmark_resources(app, window, timer, recorder) -> list[str]:
             errors.append(f"stop benchmark timer: {exc}")
     if window is not None:
         try:
+            window._benchmark_close_event_observer = None
+            window._benchmark_close_event_tokens.clear()
+        except Exception as exc:
+            errors.append(f"clear benchmark close diagnostics: {exc}")
+        try:
             window.timer.stop()
         except Exception as exc:
             errors.append(f"stop Workbench timer: {exc}")
@@ -297,6 +549,14 @@ def cleanup_benchmark_resources(app, window, timer, recorder) -> list[str]:
             app.removeEventFilter(recorder)
         except Exception as exc:
             errors.append(f"remove input event filter: {exc}")
+        native_recorder = recorder.windows_native_recorder
+        if native_recorder is not None:
+            try:
+                app.removeNativeEventFilter(native_recorder)
+            except Exception as exc:
+                errors.append(f"remove Windows close event filter: {exc}")
+            finally:
+                recorder.windows_native_recorder = None
     if window is not None:
         # Benchmark cleanup must never block on an unsaved-change prompt.
         window.save_prompt_handler = lambda: "discard"
@@ -377,10 +637,16 @@ def _finalize_benchmark_result(
         and temp_cleanup_error is None
     )
     input_events = result.get("input_events")
+    input_traces = result.get("input_delivery_traces")
     input_events_valid = isinstance(input_events, list)
+    input_traces_valid = isinstance(input_traces, list)
     events = input_events if input_events_valid else []
-    result["unexpected_external_input"] = not input_events_valid or any(
-        event.get("unexpected_external_input") is not False for event in events
+    traces = input_traces if input_traces_valid else []
+    result["unexpected_external_input"] = (
+        not input_events_valid
+        or not input_traces_valid
+        or any(event.get("unexpected_external_input") is not False for event in events)
+        or any(trace.get("spontaneous") is True for trace in traces)
     )
     result["no_unexpected_external_input"] = (
         not result["unexpected_external_input"]
@@ -388,14 +654,29 @@ def _finalize_benchmark_result(
     )
     result["input_recording_unambiguous"] = (
         input_events_valid
+        and input_traces_valid
         and all(event.get("identity_uncertain") is False for event in events)
+        and all(trace.get("identity_uncertain") is False for trace in traces)
     )
     storage_errors = result.get("storage_errors")
     result["no_storage_errors"] = (
         isinstance(storage_errors, list) and not storage_errors
     )
     metrics = result.get("final_metrics") or {}
+    try:
+        requested_duration_s = float(result.get("duration_s"))
+        requested_speed = float(result.get("requested_playback_speed_multiplier"))
+        actual_speed = float(result.get("playback_speed_multiplier"))
+        tc_perf_01_configuration = (
+            math.isfinite(requested_duration_s)
+            and requested_duration_s >= 3600.0
+            and requested_speed == 1.0
+            and actual_speed == 1.0
+        )
+    except (TypeError, ValueError):
+        tc_perf_01_configuration = False
     result["acceptance_checks"] = {
+        "tc_perf_01_run_configuration": tc_perf_01_configuration,
         "duration_completed": (
             result.get("finished") is True
             and float(result.get("simulation_time_s") or 0.0)
@@ -414,7 +695,7 @@ def _finalize_benchmark_result(
         "cleanup_succeeded": result["cleanup_succeeded"],
         "process_succeeded": result["process_succeeded"],
     }
-    result["acceptance_eligible"] = acceptance_eligibility(
+    result["acceptance_eligible"] = tc_perf_01_configuration and acceptance_eligibility(
         duration_completed=result["acceptance_checks"]["duration_completed"],
         average_fps=metrics.get("full_run_fps"),
         no_unexpected_external_input=(
@@ -432,7 +713,8 @@ def _finalize_benchmark_result(
     )
     result["acceptance_note"] = (
         "Performance measurements are reported independently. Eligibility is finalized only "
-        "after full duration, FPS, input provenance, unambiguous event recording, storage, "
+        "for a requested one-hour 1x run and after full duration, FPS, input provenance, "
+        "unambiguous event recording, storage, "
         "execution, cleanup, and worker-exit checks."
     )
     return result
@@ -476,6 +758,7 @@ def _run_gui_worker(args) -> int:
     process_cpu_seconds = 0.0
     failure_reason = None
     app_exec_code = None
+    windows_native_diagnostics_setup_error = None
 
     def make_result():
         engine = getattr(window, "engine", None)
@@ -521,13 +804,45 @@ def _run_gui_worker(args) -> int:
             "process_cpu_seconds": process_cpu_seconds if process is not None else None,
             "final_metrics": metrics,
             "input_events": recorder.events if recorder is not None else [],
-            "unexpected_external_input": any(
-                event.get("unexpected_external_input")
-                for event in (recorder.events if recorder is not None else [])
+            "input_delivery_traces": (
+                recorder.delivery_traces if recorder is not None else []
             ),
-            "input_recording_unambiguous": not any(
-                event.get("identity_uncertain")
-                for event in (recorder.events if recorder is not None else [])
+            "non_client_mouse_events": (
+                recorder.non_client_mouse_event_records() if recorder is not None else []
+            ),
+            "windows_native_close_messages": (
+                list(recorder.windows_native_recorder.events)
+                if recorder is not None and recorder.windows_native_recorder is not None
+                else []
+            ),
+            "windows_native_close_diagnostic_parse_errors": (
+                recorder.windows_native_recorder.parse_errors
+                if recorder is not None and recorder.windows_native_recorder is not None
+                else 0
+            ),
+            "windows_native_close_diagnostic_setup_error": windows_native_diagnostics_setup_error,
+            "window_close_events": (
+                recorder.window_close_events if recorder is not None else []
+            ),
+            "input_event_recording_method": (
+                "One canonical record per spontaneous QWindow ingress; all Qt target deliveries "
+                "are retained separately. Qt does not expose portable native-action identity."
+            ),
+            "unexpected_external_input": any(
+                trace.get("spontaneous") is True
+                for trace in (recorder.delivery_traces if recorder is not None else [])
+            ),
+            "input_recording_unambiguous": (
+                not any(event.get("identity_uncertain") for event in
+                        (recorder.events if recorder is not None else []))
+                and not any(trace.get("identity_uncertain") for trace in
+                            (recorder.delivery_traces if recorder is not None else []))
+            ),
+            "engine_running_transitions": (
+                list(getattr(engine, "running_state_transitions", []))
+            ),
+            "pause_provenance": (
+                list(getattr(window, "pause_provenance", [])) if window is not None else []
             ),
             "samples": samples,
             "measurement_failure_reason": failure_reason,
@@ -576,10 +891,12 @@ def _run_gui_worker(args) -> int:
         window.show()
         window.raise_()
         window.activateWindow()
-        recorder = InputEventRecorder()
+        recorder = InputEventRecorder(window=window)
+        window._benchmark_close_event_observer = recorder.record_close_outcome
         app.installEventFilter(recorder)
 
         def start_measurement():
+            nonlocal windows_native_diagnostics_setup_error
             nonlocal execution_error
             nonlocal started_at, last_frame_progress_at
             nonlocal window_visible_at_start, window_active_at_start
@@ -602,6 +919,15 @@ def _run_gui_worker(args) -> int:
                 last_frame_progress_at = started_at
                 # Arm after harness-owned setup, before simulation startup.
                 recorder.started_at = started_at
+                if sys.platform == "win32":
+                    try:
+                        native_recorder = WindowsCloseEventRecorder(recorder, window)
+                        app.installNativeEventFilter(native_recorder)
+                        recorder.windows_native_recorder = native_recorder
+                    except Exception as exc:
+                        windows_native_diagnostics_setup_error = (
+                            f"{type(exc).__name__}: {exc}"
+                        )
                 window.start_simulation()
                 if window.engine.speed != args.playback_speed:
                     raise RuntimeError("Playback speed changed during startup")
@@ -721,6 +1047,26 @@ def _run_gui_worker(args) -> int:
             "final_metrics": {},
             "samples": samples,
             "input_events": recorder.events if recorder is not None else [],
+            "input_delivery_traces": (
+                recorder.delivery_traces if recorder is not None else []
+            ),
+            "non_client_mouse_events": (
+                recorder.non_client_mouse_event_records() if recorder is not None else []
+            ),
+            "windows_native_close_messages": (
+                list(recorder.windows_native_recorder.events)
+                if recorder is not None and recorder.windows_native_recorder is not None
+                else []
+            ),
+            "windows_native_close_diagnostic_parse_errors": (
+                recorder.windows_native_recorder.parse_errors
+                if recorder is not None and recorder.windows_native_recorder is not None
+                else 0
+            ),
+            "windows_native_close_diagnostic_setup_error": windows_native_diagnostics_setup_error,
+            "window_close_events": (
+                recorder.window_close_events if recorder is not None else []
+            ),
         }
     result["execution_error"] = execution_error
     result["measurement_failure_reason"] = failure_reason
@@ -806,6 +1152,12 @@ def _run_supervisor(args) -> int:
             "final_metrics": {},
             "samples": [],
             "input_events": [],
+            "input_delivery_traces": [],
+            "non_client_mouse_events": [],
+            "windows_native_close_messages": [],
+            "windows_native_close_diagnostic_parse_errors": 0,
+            "windows_native_close_diagnostic_setup_error": None,
+            "window_close_events": [],
             "storage_errors": [],
             "execution_error": process_error,
             "benchmark_execution_succeeded": False,

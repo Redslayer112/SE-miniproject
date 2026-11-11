@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "test_case": "TC-REL-01",
+  "mode": "reliability",
+  "status": "Passed",
+  "started_at_utc": "2026-11-11T12:07:02.741227+00:00",
+  "finished_at_utc": "2026-11-11T12:07:11.390022+00:00",
+  "approved_seeds": [
+    42,
+    43,
+    44
+  ],
+  "duration_per_run_s": 3600.0,
+  "timeout_per_run_s": 60.0,
+  "continue_after_individual_failure": true,
+  "runs": [
+    {
+      "seed": 42,
+      "requested_duration_s": 3600.0,
+      "timeout_seconds": 60.0,
+      "started_at_utc": "2026-11-11T12:07:02.741227+00:00",
+      "finished_at_utc": "2026-11-11T12:07:05.926761+00:00",
+      "pid": 18836,
+      "exit_code": 0,
+      "timed_out": false,
+      "runner_status": "Passed",
+      "runner_output": {
+        "status": "Passed",
+        "exception": null,
+        "wall_clock_seconds": 2.592759200000728,
+        "check_count": 20,
+        "failed_checks": []
+      },
+      "stdout_file": "artifacts\\issue12\\tc_rel_01\\runner_seed42_20261111T120702_740960Z.stdout.txt",
+      "stderr_file": "artifacts\\issue12\\tc_rel_01\\runner_seed42_20261111T120702_740960Z.stderr.txt",
+      "runner_json": "artifacts\\issue12\\tc_rel_01\\runner_seed42_20261111T120702_740960Z.json",
+      "cleanup": {
+        "initial_pid": 18836,
+        "descendant_pids": [],
+        "terminated_pids": [],
+        "killed_pids": [],
+        "graceful_wait_seconds": 5.0,
+        "force_wait_seconds": 5.0,
+        "parent_reaped": true,
+        "remaining_pids": [],
+        "status": "Passed",
+        "errors": []
+      },
+      "supervisor_status": "Passed",
+      "exception": null,
+      "supervisor_wall_clock_seconds": 3.1855267000009917
+    },
+    {
+      "seed": 43,
+      "requested_duration_s": 3600.0,
+      "timeout_seconds": 60.0,
+      "started_at_utc": "2026-11-11T12:07:05.985776+00:00",
+      "finished_at_utc": "2026-11-11T12:07:09.164900+00:00",
+      "pid": 11576,
+      "exit_code": 0,
+      "timed_out": false,
+      "runner_status": "Passed",
+      "runner_output": {
+        "status": "Passed",
+        "exception": null,
+        "wall_clock_seconds": 2.2842613000011625,
+        "check_count": 20,
+        "failed_checks": []
+      },
+      "stdout_file": "artifacts\\issue12\\tc_rel_01\\runner_seed43_20261111T120702_740960Z.stdout.txt",
+      "stderr_file": "artifacts\\issue12\\tc_rel_01\\runner_seed43_20261111T120702_740960Z.stderr.txt",
+      "runner_json": "artifacts\\issue12\\tc_rel_01\\runner_seed43_20261111T120702_740960Z.json",
+      "cleanup": {
+        "initial_pid": 11576,
+        "descendant_pids": [],
+        "terminated_pids": [],
+        "killed_pids": [],
+        "graceful_wait_seconds": 5.0,
+        "force_wait_seconds": 5.0,
+        "parent_reaped": true,
+        "remaining_pids": [],
+        "status": "Passed",
+        "errors": []
+      },
+      "supervisor_status": "Passed",
+      "exception": null,
+      "supervisor_wall_clock_seconds": 3.179125800001202
+    },
+    {
+      "seed": 44,
+      "requested_duration_s": 3600.0,
+      "timeout_seconds": 60.0,
+      "started_at_utc": "2026-11-11T12:07:09.166215+00:00",
+      "finished_at_utc": "2026-11-11T12:07:11.388395+00:00",
+      "pid": 26388,
+      "exit_code": 0,
+      "timed_out": false,
+      "runner_status": "Passed",
+      "runner_output": {
+        "status": "Passed",
+        "exception": null,
+        "wall_clock_seconds": 1.6638384999987466,
+        "check_count": 20,
+        "failed_checks": []
+      },
+      "stdout_file": "artifacts\\issue12\\tc_rel_01\\runner_seed44_20261111T120702_740960Z.stdout.txt",
+      "stderr_file": "artifacts\\issue12\\tc_rel_01\\runner_seed44_20261111T120702_740960Z.stderr.txt",
+      "runner_json": "artifacts\\issue12\\tc_rel_01\\runner_seed44_20261111T120702_740960Z.json",
+      "cleanup": {
+        "initial_pid": 26388,
+        "descendant_pids": [],
+        "terminated_pids": [],
+        "killed_pids": [],
+        "graceful_wait_seconds": 5.0,
+        "force_wait_seconds": 5.0,
+        "parent_reaped": true,
+        "remaining_pids": [],
+        "status": "Passed",
+        "errors": []
+      },
+      "supervisor_status": "Passed",
+      "exception": null,
+      "supervisor_wall_clock_seconds": 2.222104799999215
+    }
+  ],
+  "pass_rule": "All three independent runs must pass."
+}
