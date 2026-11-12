@@ -42,10 +42,10 @@ Avoid one thing during the recording:
 
 ## 3. Testing reports under `docs/` (owner: #34)
 
-- [x] Unit Test Report (`docs/unit_test_report_2026-11-06.md`)
-- [x] System Validation Report (`docs/system_validation_report_2026-11-06.md`)
-- [x] Code Coverage Report (`docs/code_coverage_report_2026-11-06.md`)
-- [x] Branch Coverage Report (`docs/branch_coverage_report_2026-11-06.md`)
+- [x] Unit Test Report (`docs/unit_test_report_2026-11-12.md`)
+- [x] System Validation Report (`docs/system_validation_report_2026-11-12.md`)
+- [x] Code Coverage Report (`docs/code_coverage_report_2026-11-12.md`)
+- [x] Branch Coverage Report (`docs/branch_coverage_report_2026-11-12.md`)
 
 Evidence already in the repo: `docs/test_execution_record.md`, `docs/test_catalogue.md`, `docs/issue10_acceptance.md`, `docs/issue12_acceptance.md` and `docs/system_integration_report.md`. The engine unit and regression results are in the description of PR #38.
 
