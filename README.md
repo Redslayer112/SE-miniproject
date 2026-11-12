@@ -244,7 +244,15 @@ The latest verified full test run completed with **597 tests passed** under Pyth
 
 ### Continuous Integration
 
-GitHub Actions runs the test suite on pushes to `main` and pull requests. The workflow uses Windows and Python 3.11, installs the project with its development dependencies, and runs `pytest`.
+GitHub Actions runs a CI/CD pipeline (`.github/workflows/ci.yml`) on every pull request, every push to `main`, and every version tag:
+
+1. **lint**: ruff, syntax errors and undefined names.
+2. **test**: the full suite on Windows (Python 3.11) with branch coverage; fails under 80%.
+3. **test-linux**: the full suite on Ubuntu with Qt offscreen.
+4. **build**: builds the wheel and sdist, installs the wheel in a clean environment and runs a scenario headless.
+5. **release** (tags `v*` only): publishes a GitHub Release with the package and the v1.1 documents.
+
+Stages 1–3 run in parallel; build runs only when they all pass. Details: [`docs/ci_cd_pipeline.md`](docs/ci_cd_pipeline.md).
 
 ## Development Status and Future Work
 
