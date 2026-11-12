@@ -12,6 +12,7 @@ $GITHUB_OUTPUT so the final Scorecard job can combine them. Run without those va
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -52,16 +53,21 @@ def lint(critical_json: str, all_json: str, *dirs: str) -> None:
     for v in style:
         rules[v["code"]] = rules.get(v["code"], 0) + 1
     top = ", ".join(f"`{c}` ×{n}" for c, n in sorted(rules.items(), key=lambda kv: -kv[1])[:5]) or "none"
+    # Pylint's scoring formula: 10 - 10 * (5 * errors + warnings) / statements, floored at 0.
+    statements = sum(isinstance(n, ast.stmt) for f in files
+                     for n in ast.walk(ast.parse(Path(f).read_text(encoding="utf-8-sig"))))
+    rating = max(0.0, 10.0 - 10.0 * (5 * len(critical) + len(style)) / statements) if statements else 10.0
     emit(
         "## 1 · Lint\n\n"
         "| Check | Result |\n|---|---|\n"
-        f"| Python files checked | {len(files)} |\n"
+        f"| **Lint score** (pylint formula) | **{rating:.2f} / 10** |\n"
+        f"| Python files / statements checked | {len(files)} / {statements} |\n"
         f"| Blocking errors (syntax, undefined names) | **{len(critical)}** · {mark(not critical)} |\n"
         f"| Code warnings (pyflakes: unused imports and variables, non-blocking) | {len(style)} |\n"
         f"| Files with no warnings | {clean}/{len(files)} (**{score:.1f}%**) |\n"
         f"| Most frequent warnings | {top} |\n",
         {"lint_errors": len(critical), "lint_warnings": len(style), "lint_files": len(files),
-         "lint_clean_pct": f"{score:.1f}"},
+         "lint_clean_pct": f"{score:.1f}", "lint_score": f"{rating:.2f}"},
     )
 
 
@@ -123,7 +129,8 @@ def scorecard() -> None:
     emit(
         "# 🚦 Pipeline scorecard\n\n"
         "| Stage | Status | Score |\n|---|---|---|\n"
-        f"| 1 · Lint | {status(e('LINT_RESULT'))} | {e('LINT_ERRORS', '?')} blocking errors · "
+        f"| 1 · Lint | {status(e('LINT_RESULT'))} | **{e('LINT_SCORE', '?')} / 10** · "
+        f"{e('LINT_ERRORS', '?')} blocking errors · "
         f"{e('LINT_CLEAN', '?')}% files warning-free ({e('LINT_WARNINGS', '?')} code warnings) |\n"
         f"| 2 · Test | {status(e('TEST_RESULT'))} | {e('TESTS_PASSED', '?')}/{e('TESTS_TOTAL', '?')} passed "
         f"(**{e('PASS_RATE', '?')}%**) · {e('TESTS_FAILED', '?')} failed |\n"

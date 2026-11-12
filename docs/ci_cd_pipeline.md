@@ -45,13 +45,13 @@ Stage 3 runs only if stages 1 and 2 both pass. Stage 4 runs only if stage 3 pass
 
 | Stage | Scores |
 |---|---|
-| 1 · Lint | Files checked, blocking errors (must be 0), pyflakes warnings (unused imports and variables), share of warning-free files, most frequent warning codes |
+| 1 · Lint | **Lint score out of 10** (pylint formula: 10 − 10 × (5 × errors + warnings) / statements), files and statements checked, blocking errors (must be 0), pyflakes warnings (unused imports and variables), share of warning-free files, most frequent warning codes |
 | 2 · Test | Tests run, passed, failed, skipped, pass rate, duration; statement, branch and combined coverage against the 80% gate; per-file coverage (expandable) |
 | 3 · Build & smoke test | Wheel and sdist with sizes; vehicles completed by the installed wheel (expected 30) and mean travel time |
 | 4 · Release | Link to the published release |
-| 5 · Scorecard | All of the above in one table, with a status per stage |
+| 5 · Scorecard | All of the above in one table, with a status per stage. The node's name in the pipeline graph carries the headline scores (lint score, tests passed, coverage, smoke result) |
 
-Reference values on 12 Nov 2026 (local run of the same commands): 0 blocking lint errors, 64 pyflakes warnings, 55/72 files warning-free (76.4%); 597/597 tests passed; coverage 88.4% statements, 74.9% branches, 85.5% combined; wheel 102.6 KB; 30/30 vehicles, 16.4 s mean travel time.
+Reference values on 12 Nov 2026 (local run of the same commands): lint score 9.95/10 (72 files, 12,757 statements), 0 blocking lint errors, 64 pyflakes warnings, 55/72 files warning-free (76.4%); 597/597 tests passed; coverage 88.4% statements, 74.9% branches, 85.5% combined; wheel 102.6 KB; 30/30 vehicles, 16.4 s mean travel time.
 
 ## Development flow
 
