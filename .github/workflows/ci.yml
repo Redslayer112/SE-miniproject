@@ -1,34 +1,188 @@
+name: CI/CD
 
-name: CI
-
+# CI: every pull request and every push to main runs lint, the test suite with a coverage gate, and a package build.
+# CD: pushing a version tag (v*) runs the same pipeline, then publishes a GitHub Release with the build.
+# Every stage writes its scores to the run summary (scripts/ci_report.py); "5 · Scorecard" combines them.
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    runs-on: windows-latest
-
+  # Stage 1: static checks. Only real errors (syntax errors, undefined names) block; other findings are scored.
+  lint:
+    name: 1 · Lint
+    runs-on: ubuntu-latest
+    outputs:
+      errors: ${{ steps.score.outputs.lint_errors }}
+      warnings: ${{ steps.score.outputs.lint_warnings }}
+      clean: ${{ steps.score.outputs.lint_clean_pct }}
+      score: ${{ steps.score.outputs.lint_score }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install ruff
+        run: python -m pip install ruff
+      - name: Ruff gate (syntax errors and undefined names)
+        run: ruff check --select E9,F63,F7,F82 --output-format github src tests scripts
+      - name: Lint scores
+        id: score
+        if: always()
+        run: |
+          ruff check --select E9,F63,F7,F82 --output-format json --exit-zero src tests scripts > critical.json
+          ruff check --select F --output-format json --exit-zero src tests scripts > warnings.json
+          python scripts/ci_report.py lint critical.json warnings.json src tests scripts
 
+  # Stage 2: the full suite on the target platform (SRS: Windows), with branch coverage and an 80% gate.
+  test:
+    name: 2 · Test (Windows, Python 3.11)
+    runs-on: windows-latest
+    outputs:
+      total: ${{ steps.score.outputs.tests_total }}
+      passed: ${{ steps.score.outputs.tests_passed }}
+      failed: ${{ steps.score.outputs.tests_failed }}
+      rate: ${{ steps.score.outputs.pass_rate }}
+      cov_stmt: ${{ steps.score.outputs.cov_stmt }}
+      cov_branch: ${{ steps.score.outputs.cov_branch }}
+      cov_combined: ${{ steps.score.outputs.cov_combined }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install project and test dependencies
-        run: python -m pip install -e ".[dev]"
-
-      - name: Run tests
+        run: python -m pip install -e ".[dev]" coverage
+      - name: Run tests with coverage
         shell: pwsh
         env:
           PYTHONFAULTHANDLER: "1"
         run: |
-          python -m pytest
+          python -m coverage run --branch --source=src/tms_sim -m pytest --junitxml=junit.xml
           $pytestExitCode = $LASTEXITCODE
           Write-Host "PYTEST_PROCESS_EXIT_CODE=$pytestExitCode"
           exit $pytestExitCode
+      - name: Coverage gate (fails under 80%)
+        run: python -m coverage report --fail-under=80
+      - name: Test and coverage scores
+        id: score
+        if: always() && hashFiles('junit.xml') != ''
+        shell: pwsh
+        run: |
+          python -m coverage json -q -o coverage.json
+          python scripts/ci_report.py test junit.xml coverage.json
+          "<details><summary>Coverage per file</summary>`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          python -m coverage report --format=markdown | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "`n</details>" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          python -m coverage xml -q
+          python -m coverage html -q
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-and-coverage-report
+          path: |
+            junit.xml
+            coverage.xml
+            htmlcov/
+
+  # Stage 3: build the package and prove the built wheel works in a clean environment.
+  build:
+    name: 3 · Build & smoke test
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    outputs:
+      completed: ${{ steps.score.outputs.smoke_completed }}
+      travel: ${{ steps.score.outputs.smoke_travel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Smoke test the wheel in a fresh virtual environment
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          cd /tmp && /tmp/smoke/bin/python -m tms_sim run "$GITHUB_WORKSPACE/tests/data/scenario/small_valid_scenario.json" | tee "$GITHUB_WORKSPACE/smoke.txt"
+          grep -q "completed 30" "$GITHUB_WORKSPACE/smoke.txt"
+      - name: Build scores
+        id: score
+        if: always() && hashFiles('smoke.txt') != ''
+        run: python scripts/ci_report.py build smoke.txt dist
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # Stage 4 (CD): on a version tag, publish a GitHub Release with the package and the final documents.
+  release:
+    name: 4 · Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Tag must match the package version
+        run: |
+          version=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match pyproject version $version"; exit 1; }
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            docs/SRS_v1.1.pdf docs/SAD_v1.1.pdf docs/Test_Plan_v1.1.pdf \
+            --title "TMS-Sim $GITHUB_REF_NAME" --generate-notes
+          url=$(gh release view "$GITHUB_REF_NAME" --json url --jq .url)
+          printf '## 4 · Release\n\n✅ Published [TMS-Sim %s](%s) with the wheel, sdist and SRS/SAD/Test Plan v1.1.\n' "$GITHUB_REF_NAME" "$url" >> "$GITHUB_STEP_SUMMARY"
+
+  # Final node: one table with every stage's status and score.
+  scorecard:
+    name: "5 · Scorecard · Lint ${{ needs.lint.outputs.score || '?' }}/10 · Tests ${{ needs.test.outputs.passed || '?' }}/${{ needs.test.outputs.total || '?' }} (${{ needs.test.outputs.rate || '?' }}%) · Coverage ${{ needs.test.outputs.cov_combined || '?' }}% · Smoke ${{ needs.build.outputs.completed || '?' }}/30"
+    if: always()
+    needs: [lint, test, build, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pipeline scorecard
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          LINT_ERRORS: ${{ needs.lint.outputs.errors }}
+          LINT_WARNINGS: ${{ needs.lint.outputs.warnings }}
+          LINT_CLEAN: ${{ needs.lint.outputs.clean }}
+          LINT_SCORE: ${{ needs.lint.outputs.score }}
+          TESTS_TOTAL: ${{ needs.test.outputs.total }}
+          TESTS_PASSED: ${{ needs.test.outputs.passed }}
+          TESTS_FAILED: ${{ needs.test.outputs.failed }}
+          PASS_RATE: ${{ needs.test.outputs.rate }}
+          COV_STMT: ${{ needs.test.outputs.cov_stmt }}
+          COV_BRANCH: ${{ needs.test.outputs.cov_branch }}
+          COV_COMBINED: ${{ needs.test.outputs.cov_combined }}
+          SMOKE_COMPLETED: ${{ needs.build.outputs.completed }}
+          SMOKE_TRAVEL: ${{ needs.build.outputs.travel }}
+        run: python3 scripts/ci_report.py scorecard
