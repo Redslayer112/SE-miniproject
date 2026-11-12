@@ -1,6 +1,6 @@
 # CI/CD Pipeline
 
-Workflow file: `.github/workflows/ci.yml` (GitHub Actions). Results are on the repository's **Actions** tab and on every pull request. Each run's summary page shows the coverage table, the built files and the smoke-test output.
+Workflow file: `.github/workflows/ci.yml` (GitHub Actions). Results are on the repository's **Actions** tab and on every pull request. Below the pipeline graph, each run's summary page shows a **scorecard** for every stage (lint counts, test pass rate, coverage, build and smoke-test results) and a combined **Pipeline scorecard**. The scores are produced by `scripts/ci_report.py`.
 
 ## Triggers
 
@@ -26,6 +26,9 @@ pull request / push to main / tag v*
         │
         ▼  (tags v* only)
    4 · Release                            GitHub Release: wheel, sdist, SRS/SAD/Test Plan v1.1 PDFs
+        │
+        ▼  (always, even if a stage fails)
+   5 · Scorecard                          one table: every stage's status and score
 ```
 
 | Stage | Job | Checks | Fails when | Output |
@@ -34,8 +37,21 @@ pull request / push to main / tag v*
 | 2. Test | `2 · Test (Windows, Python 3.11)` | `pytest` under `coverage` with branch measurement on `windows-latest` | Any test fails, the process exits non-zero, or statement+branch coverage is below 80% | Coverage table in the run summary; `coverage-report` artifact (XML and HTML) |
 | 3. Build | `3 · Build & smoke test` | `python -m build`; the wheel is installed into a fresh virtual environment and runs `python -m tms_sim run` on the sample scenario | The package does not build or install, or the run does not complete 30 vehicles | Build and smoke output in the run summary; `dist` artifact (wheel and sdist) |
 | 4. Release (CD) | `4 · Release` | Tag name equals `v` + the version in `pyproject.toml` | Tag and version disagree | GitHub Release with generated notes, the package, and the v1.1 documents |
+| 5. Report | `5 · Scorecard` | Collects every stage's result and scores | Never blocks | Pipeline scorecard in the run summary |
 
-Stage 3 runs only if stages 1 and 2 both pass. Stage 4 runs only if stage 3 passes and the ref is a `v*` tag.
+Stage 3 runs only if stages 1 and 2 both pass. Stage 4 runs only if stage 3 passes and the ref is a `v*` tag. Stage 5 always runs.
+
+## Scores shown on each run
+
+| Stage | Scores |
+|---|---|
+| 1 · Lint | Files checked, blocking errors (must be 0), pyflakes warnings (unused imports and variables), share of warning-free files, most frequent warning codes |
+| 2 · Test | Tests run, passed, failed, skipped, pass rate, duration; statement, branch and combined coverage against the 80% gate; per-file coverage (expandable) |
+| 3 · Build & smoke test | Wheel and sdist with sizes; vehicles completed by the installed wheel (expected 30) and mean travel time |
+| 4 · Release | Link to the published release |
+| 5 · Scorecard | All of the above in one table, with a status per stage |
+
+Reference values on 12 Nov 2026 (local run of the same commands): 0 blocking lint errors, 64 pyflakes warnings, 55/72 files warning-free (76.4%); 597/597 tests passed; coverage 88.4% statements, 74.9% branches, 85.5% combined; wheel 102.6 KB; 30/30 vehicles, 16.4 s mean travel time.
 
 ## Development flow
 
@@ -66,4 +82,4 @@ Stage 3 runs only if stages 1 and 2 both pass. Stage 4 runs only if stage 3 pass
 | First workflow: `pytest` on Windows, Python 3.11 (issue #13) | #14 |
 | Prints the pytest process exit code | #24 |
 | Explicit Qt teardown fixes an intermittent non-zero exit after all tests pass | #25 |
-| Full CI/CD: lint, coverage gate, build and smoke test, tag-driven release | #48 |
+| Full CI/CD: lint, coverage gate, build and smoke test, tag-driven release, per-stage scorecards | #48 |

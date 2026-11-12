@@ -251,7 +251,7 @@ GitHub Actions runs a CI/CD pipeline (`.github/workflows/ci.yml`) on every pull 
 3. **Build & smoke test**: builds the wheel and sdist, installs the wheel in a clean environment and runs a scenario headless.
 4. **Release** (tags `v*` only): publishes a GitHub Release with the package and the v1.1 documents.
 
-Stages 1 and 2 run in parallel; stage 3 runs only when both pass. Details: [`docs/ci_cd_pipeline.md`](docs/ci_cd_pipeline.md).
+Stages 1 and 2 run in parallel; stage 3 runs only when both pass. A final **Scorecard** job shows every stage's score (lint findings, test pass rate, coverage, smoke-test result) under the pipeline graph. Details: [`docs/ci_cd_pipeline.md`](docs/ci_cd_pipeline.md).
 
 ## Development Status and Future Work
 
